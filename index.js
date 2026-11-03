@@ -246,6 +246,7 @@ function findIdleTarget() {
   if (!bot?.entity) return null
   const now = Date.now()
   let best = null
+  let bestDistance = Infinity
 
   for (const [username, player] of Object.entries(bot.players)) {
     const entity = player.entity
@@ -254,8 +255,9 @@ function findIdleTarget() {
     if ((now - activity.lastMovedAt) / 1000 < IDLE_SECONDS) continue
     if ((playerCooldowns.get(username) || 0) > now) continue
     const distance = bot.entity.position.distanceTo(entity.position)
+    if (distance >= bestDistance) continue
     best = { username, entity, distance }
-    break
+    bestDistance = distance
   }
   return best
 }
