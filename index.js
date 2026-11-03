@@ -163,26 +163,42 @@ function findVisibleSafePosition(target) {
   const entity = target.entity
   const yaw = entity.yaw
   const pitch = entity.pitch
-  const direction = new Vec3(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch))
+  const direction = new Vec3(-Math.sin(yaw) * Math.cos(pitch), 0, Math.cos(yaw) * Math.cos(pitch))
   const side = new Vec3(-direction.z, 0, direction.x)
-  const distances = []
+  const modes = [
+    { name: 'behind', direction: direction.scaled(-1), distances: [3, 4, 5, 6], offsets: [0, 1, -1] },
+    { name: 'just ahead', direction, distances: [3, 4, 5], offsets: [0, 1, -1] },
+    { name: 'in the field of view', direction, distances: [6, 7, 8, 9], offsets: [0, 1, -1, 2, -2] },
+    { name: 'to the side', direction: Math.random() < 0.5 ? side : side.scaled(-1), distances: [4, 5, 6], offsets: [0, 1, -1] }
+  ]
+  const mode = modes[Math.floor(Math.random() * modes.length)]
+  const candidates = []
 
-  for (let distance = MIN_APPEAR_DISTANCE; distance <= MAX_APPEAR_DISTANCE; distance += 1) distances.push(distance)
-  for (let i = distances.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[distances[i], distances[j]] = [distances[j], distances[i]]
+  for (const distance of mode.distances) {
+    for (const sideOffset of mode.offsets) {
+      candidates.push({ distance, sideOffset })
+    }
   }
 
-  for (const distance of distances) {
-    for (const sideOffset of [0, 1, -1, 2, -2]) {
-      const point = entity.position.offset(direction.x * distance + side.x * sideOffset, 0, direction.z * distance + side.z * sideOffset)
-      const x = Math.floor(point.x)
-      const z = Math.floor(point.z)
-      const baseY = Math.floor(entity.position.y)
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[candidates[i], candidates[j]] = [candidates[j], candidates[i]]
+  }
 
-      for (const yOffset of [0, -1, 1, -2, 2]) {
-        const groundY = baseY + yOffset - 1
-        if (isSafeStandingPosition(x, z, groundY)) return new Vec3(x + 0.5, groundY + 1, z + 0.5)
+  for (const candidate of candidates) {
+    const point = entity.position.offset(
+      mode.direction.x * candidate.distance + side.x * candidate.sideOffset,
+      0,
+      mode.direction.z * candidate.distance + side.z * candidate.sideOffset
+    )
+    const x = Math.floor(point.x)
+    const z = Math.floor(point.z)
+    const baseY = Math.floor(entity.position.y)
+
+    for (const yOffset of [0, -1, 1, -2, 2]) {
+      const groundY = baseY + yOffset - 1
+      if (isSafeStandingPosition(x, z, groundY)) {
+        return { position: new Vec3(x + 0.5, groundY + 1, z + 0.5), mode: mode.name }
       }
     }
   }
@@ -345,19 +361,19 @@ function teleportNearPlayer(target) {
       return
     }
 
-    const safePosition = findVisibleSafePosition(refreshedTarget)
-    if (!safePosition) {
+    const apparition = findVisibleSafePosition(refreshedTarget)
+    if (!apparition) {
       log('No safe solid block found near ' + target.username + ' after loading target chunks.')
       returnToPreviousPosition('no safe apparition position was found')
       return
     }
 
     targetStartPosition = refreshedTarget.entity.position.clone()
-    apparitionPosition = safePosition
+    apparitionPosition = apparition.position
     currentAction = 'appearing'
-    log('Trying to appear in ' + target.username + ' view at ' + safePosition.toString())
+    log('Random apparition mode: ' + apparition.mode + '. Trying position ' + apparitionPosition.toString())
 
-    teleportTo(apparitionPosition, 'appear in front of ' + target.username, appeared => {
+    teleportTo(apparitionPosition, 'appear ' + apparition.mode + ' of ' + target.username, appeared => {
       if (!connected || currentAction !== 'appearing') return
       if (!appeared) {
         playerCooldowns.set(target.username, Date.now() + 15000)
