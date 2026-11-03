@@ -8,7 +8,6 @@ const MC_HOST = process.env.MC_HOST
 const MC_PORT = Number(process.env.MC_PORT || 25565)
 const MC_VERSION = process.env.MC_VERSION || '1.21.4'
 const IDLE_SECONDS = Math.max(8, Number(process.env.IDLE_SECONDS || 12))
-const MAX_DISTANCE = Math.max(8, Number(process.env.MAX_DISTANCE || 18))
 const MIN_APPEAR_DISTANCE = Math.max(5, Number(process.env.MIN_APPEAR_DISTANCE || 6))
 const MAX_APPEAR_DISTANCE = Math.max(MIN_APPEAR_DISTANCE + 1, Number(process.env.MAX_APPEAR_DISTANCE || 20))
 const APPEAR_SECONDS = Math.max(1, Number(process.env.APPEAR_SECONDS || 5))
@@ -247,7 +246,6 @@ function findIdleTarget() {
   if (!bot?.entity) return null
   const now = Date.now()
   let best = null
-  let bestDistance = Infinity
 
   for (const [username, player] of Object.entries(bot.players)) {
     const entity = player.entity
@@ -256,9 +254,8 @@ function findIdleTarget() {
     if ((now - activity.lastMovedAt) / 1000 < IDLE_SECONDS) continue
     if ((playerCooldowns.get(username) || 0) > now) continue
     const distance = bot.entity.position.distanceTo(entity.position)
-    if (distance > MAX_DISTANCE || distance >= bestDistance) continue
     best = { username, entity, distance }
-    bestDistance = distance
+    break
   }
   return best
 }
@@ -274,34 +271,54 @@ function scheduleTroll(delay = 2500) {
 
 function teleportNearPlayer(target) {
   if (!bot?.entity || !target?.entity) return
-  const safePosition = findVisibleSafePosition(target)
-  if (!safePosition) {
-    log('No safe solid block found in ' + target.username + ' view. Skipping apparition.')
-    playerCooldowns.set(target.username, Date.now() + 10000)
-    scheduleTroll(2500)
-    return
-  }
 
   previousPosition = bot.entity.position.clone()
-  targetStartPosition = target.entity.position.clone()
-  apparitionPosition = safePosition
   currentTarget = target.username
-  currentAction = 'appearing'
-  log('Trying to appear in ' + target.username + ' view at ' + safePosition.toString())
+  currentAction = 'preparing'
+  log('Target selected: ' + target.username + '; distance=' + target.distance.toFixed(1) + ' blocks. Loading target chunks.')
 
-  teleportTo(apparitionPosition, 'appear in front of ' + target.username, success => {
-    if (!connected || currentAction !== 'appearing') return
+  teleportTo(target.entity.position, 'move near ' + target.username + ' to load chunks', success => {
+    if (!connected || currentAction !== 'preparing') return
     if (!success) {
+      log('Could not reach ' + target.username + ' to load target chunks.')
       playerCooldowns.set(target.username, Date.now() + 15000)
       currentAction = 'waiting'
       currentTarget = null
       previousPosition = null
-      apparitionPosition = null
-      targetStartPosition = null
       scheduleTroll(5000)
       return
     }
-    returnTimer = setTimeout(() => returnToPreviousPosition('five-second appearance ended'), APPEAR_SECONDS * 1000)
+
+    setTimeout(() => {
+      if (!connected || currentAction !== 'preparing') return
+      const refreshedTarget = bot.players[target.username]
+      if (!refreshedTarget?.entity) {
+        returnToPreviousPosition('target disappeared while loading chunks')
+        return
+      }
+
+      const safePosition = findVisibleSafePosition(refreshedTarget)
+      if (!safePosition) {
+        log('No safe solid block found near ' + target.username + ' after loading target chunks.')
+        returnToPreviousPosition('no safe apparition position was found')
+        return
+      }
+
+      targetStartPosition = refreshedTarget.entity.position.clone()
+      apparitionPosition = safePosition
+      currentAction = 'appearing'
+      log('Trying to appear in ' + target.username + ' view at ' + safePosition.toString())
+
+      teleportTo(apparitionPosition, 'appear in front of ' + target.username, appeared => {
+        if (!connected || currentAction !== 'appearing') return
+        if (!appeared) {
+          playerCooldowns.set(target.username, Date.now() + 15000)
+          returnToPreviousPosition('apparition teleport failed')
+          return
+        }
+        returnTimer = setTimeout(() => returnToPreviousPosition('five-second appearance ended'), APPEAR_SECONDS * 1000)
+      })
+    }, 1800)
   })
 }
 
