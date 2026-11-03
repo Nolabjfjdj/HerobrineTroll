@@ -166,10 +166,10 @@ function findVisibleSafePosition(target) {
   const direction = new Vec3(-Math.sin(yaw) * Math.cos(pitch), 0, Math.cos(yaw) * Math.cos(pitch))
   const side = new Vec3(-direction.z, 0, direction.x)
   const modes = [
-    { name: 'behind', direction: direction.scaled(-1), distances: [3, 4, 5, 6], offsets: [0, 1, -1] },
-    { name: 'just ahead', direction, distances: [3, 4, 5], offsets: [0, 1, -1] },
-    { name: 'in the field of view', direction, distances: [6, 7, 8, 9], offsets: [0, 1, -1, 2, -2] },
-    { name: 'to the side', direction: Math.random() < 0.5 ? side : side.scaled(-1), distances: [4, 5, 6], offsets: [0, 1, -1] }
+    { name: 'in front, close', direction, distances: [4, 5, 6], offsets: [0, 1, -1] },
+    { name: 'in front, at a distance', direction, distances: [7, 8, 9, 10, 11], offsets: [0, 1, -1] },
+    { name: 'slightly to the left', direction, distances: [5, 6, 7, 8], offsets: [-2, -1] },
+    { name: 'slightly to the right', direction, distances: [5, 6, 7, 8], offsets: [1, 2] }
   ]
   const mode = modes[Math.floor(Math.random() * modes.length)]
   const candidates = []
@@ -300,11 +300,6 @@ function samplePlayerActivity() {
       returnToPreviousPosition('target left the server')
       return
     }
-    if (playerIsLookingAtHerobrine(target)) {
-      log(currentTarget + ' is looking at Herobrine. Vanishing now.')
-      returnToPreviousPosition('the player looked at Herobrine')
-      return
-    }
     const startDistance = targetStartPosition.distanceTo(apparitionPosition)
     const currentDistance = target.position.distanceTo(apparitionPosition)
     if (startDistance - currentDistance >= 0.8) {
@@ -380,9 +375,19 @@ function teleportNearPlayer(target) {
         returnToPreviousPosition('apparition teleport failed')
         return
       }
-      returnTimer = setTimeout(() => returnToPreviousPosition('five-second appearance ended'), APPEAR_SECONDS * 1000)
+
+      const liveTarget = bot.players[target.username]?.entity
+      if (liveTarget) {
+        const lookPoint = liveTarget.position.offset(0, 1.6, 0)
+        bot.lookAt(lookPoint, true, error => {
+          if (error) log('Could not turn Herobrine toward ' + target.username + ': ' + error.message)
+          else log('Herobrine is now facing ' + target.username + '.')
+        })
+      }
+
+      returnTimer = setTimeout(() => returnToPreviousPosition('appearance time ended'), APPEAR_SECONDS * 1000)
     })
-  }, 1800)
+  }, 800)
 }
 
 function runTrollStep() {
