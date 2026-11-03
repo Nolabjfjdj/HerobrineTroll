@@ -100,7 +100,7 @@ function teleportTo(position, reason, callback) {
   }
 
   const destination = new Vec3(Math.floor(position.x) + 0.5, Math.floor(position.y), Math.floor(position.z) + 0.5)
-  const command = '/minecraft:teleport ' + bot.username + ' ' + destination.x.toFixed(1) + ' ' + destination.y.toFixed(1) + ' ' + destination.z.toFixed(1)
+  const command = '/tp ' + bot.username + ' ' + destination.x.toFixed(1) + ' ' + destination.y.toFixed(1) + ' ' + destination.z.toFixed(1)
   log('Teleport requested: ' + reason + '; destination=' + destination.toString() + '; command=' + command)
   bot.chat(command)
 
@@ -333,7 +333,7 @@ function teleportNearPlayer(target) {
   currentAction = 'preparing'
   log('Target selected: ' + target.username + '; idle for ' + Math.floor(target.idleFor / 1000) + ' seconds. Teleporting to load target chunks.')
   log('Teleporting Herobrine directly to ' + target.username + '.')
-  bot.chat('/minecraft:teleport ' + bot.username + ' ' + target.username)
+  bot.chat('/tp ' + bot.username + ' ' + target.username)
 
   setTimeout(() => {
     if (!connected || currentAction !== 'preparing') return
