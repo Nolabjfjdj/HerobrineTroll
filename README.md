@@ -1,17 +1,18 @@
 # HerobrineTroll
 
-Bot Minecraft Java Edition 1.21.4 utilisant Mineflayer, avec un serveur HTTP de statut pour Render et un comportement de harcèlement visuel non agressif.
+Bot Minecraft Java Edition 1.21.4 utilisant Mineflayer, avec un serveur HTTP de statut pour Render et des apparitions par téléportation.
 
 ## Comportement
 
-Quand un joueur reste immobile suffisamment longtemps et se trouve à proximité, Herobrine peut :
+Quand un joueur reste immobile suffisamment longtemps et se trouve à proximité, Herobrine :
 
-- se tourner vers lui ;
-- avancer brièvement dans sa direction ;
-- rester à le regarder ;
-- reculer puis attendre avant de recommencer.
+- mémorise sa position actuelle ;
+- se téléporte à environ 3 blocs derrière le joueur ;
+- attend jusqu'à 5 secondes ;
+- revient immédiatement à sa position précédente si le joueur s'approche ;
+- sinon, revient à sa position précédente à la fin des 5 secondes.
 
-Le bot ne frappe pas les joueurs, ne casse ni ne pose de blocs et n'utilise aucune commande administrateur. Il ne peut pas se téléporter ni devenir invisible sans fonctionnalité serveur dédiée ou permissions adaptées. Son déplacement est direct et ne dispose pas de pathfinding.
+Le bot ne frappe pas les joueurs et ne casse ni ne pose de blocs. Les téléportations utilisent la commande serveur `/tp`, le compte Herobrine doit donc avoir la permission de l'exécuter.
 
 ## Configuration
 
@@ -23,9 +24,11 @@ Variables d'environnement :
 - `PORT` : port HTTP fourni automatiquement par Render
 - `TROLL_ENABLED` : active le comportement (par défaut : `true`)
 - `IDLE_SECONDS` : durée d'immobilité requise en secondes (par défaut : `12`)
-- `MAX_DISTANCE` : distance maximale de détection en blocs (par défaut : `18`)
+- `MAX_DISTANCE` : distance maximale entre Herobrine et le joueur (par défaut : `18`)
+- `APPEAR_DISTANCE` : distance d'apparition derrière le joueur en blocs (par défaut : `3`)
+- `APPEAR_SECONDS` : durée maximale de l'apparition en secondes (par défaut : `5`)
 
-Le bot utilise le mode `offline`. Le serveur Minecraft doit donc accepter les connexions offline.
+Le bot utilise le mode `offline`. Le serveur Minecraft doit donc accepter les connexions offline. Un pseudo offline n'est pas authentifié par Microsoft : ne donne pas OP à ce compte sur un serveur exposé à des joueurs non fiables.
 
 ## Lancement local
 
@@ -49,7 +52,3 @@ Le fichier `render.yaml` contient une configuration Blueprint. Il est également
 - Health check path : `/health`
 
 Définir `MC_HOST` avec l'adresse du serveur Minecraft.
-
-## Sécurité
-
-En mode offline, un pseudo n'est pas authentifié par Microsoft. Ne donne pas de privilèges OP à ce compte sur un serveur exposé à des joueurs non fiables.
