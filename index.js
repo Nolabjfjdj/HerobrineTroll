@@ -202,25 +202,80 @@ function playerIsLookingAtHerobrine(entity) {
   return dot >= LOOK_DOT_THRESHOLD
 }
 
-function samplePlayerActivity() {
-  if (!bot?.entity) return
+function recordPlayerPosition(username, position) {
   const now = Date.now()
-
-  for (const [username, player] of Object.entries(bot.players)) {
-    const entity = player.entity
-    if (!entity || username === bot.username || entity.type !== 'player') continue
-    const position = entity.position
-    const previous = playerActivity.get(username)
-    if (!previous || previous.position.distanceTo(position) > 0.35) {
-      playerActivity.set(username, { position: position.clone(), lastMovedAt: now })
-    } else {
-      previous.position = position.clone()
-    }
+  const previous = playerActivity.get(username)
+  if (!previous || previous.position.distanceTo(position) > 0.35) {
+    playerActivity.set(username, { position: position.clone(), lastMovedAt: now })
+  } else {
+    previous.position = position.clone()
   }
+}
+
+let positionPollTimer = null
+let positionQueryTimeout = null
+let pendingPositionQuery = null
+let positionQueryIndex = 0
+
+function schedulePositionPoll(delay = 1000) {
+  if (!connected || !bot || stopping) return
+  if (positionPollTimer) clearTimeout(positionPollTimer)
+  positionPollTimer = setTimeout(() => {
+    positionPollTimer = null
+    pollRemotePlayerPositions()
+  }, delay)
+}
+
+function pollRemotePlayerPositions() {
+  if (!connected || !bot || stopping || pendingPositionQuery) {
+    schedulePositionPoll(1000)
+    return
+  }
+
+  const usernames = Object.keys(bot.players).filter(username =>
+    username !== bot.username && /^[A-Za-z0-9_]{1,16}$/.test(username)
+  )
 
   for (const username of playerActivity.keys()) {
-    if (!bot.players[username]?.entity) playerActivity.delete(username)
+    if (!bot.players[username]) playerActivity.delete(username)
   }
+
+  if (!usernames.length) {
+    schedulePositionPoll(2000)
+    return
+  }
+
+  positionQueryIndex %= usernames.length
+  const username = usernames[positionQueryIndex]
+  positionQueryIndex = (positionQueryIndex + 1) % usernames.length
+  pendingPositionQuery = username
+  log('Querying position of ' + username + ' through the server.')
+  bot.chat('/data get entity ' + username + ' Pos')
+
+  positionQueryTimeout = setTimeout(() => {
+    if (pendingPositionQuery !== username) return
+    pendingPositionQuery = null
+    positionQueryTimeout = null
+    log('Position query timed out for ' + username + '.')
+    schedulePositionPoll(1000)
+  }, 3000)
+}
+
+function handlePositionResponse(message) {
+  if (!pendingPositionQuery) return
+  const match = message.match(/\[\s*(-?\d+(?:\.\d+)?)[dDfF]?\s*,\s*(-?\d+(?:\.\d+)?)[dDfF]?\s*,\s*(-?\d+(?:\.\d+)?)[dDfF]?\s*\]/)
+  if (!match) return
+
+  const username = pendingPositionQuery
+  if (positionQueryTimeout) clearTimeout(positionQueryTimeout)
+  positionQueryTimeout = null
+  pendingPositionQuery = null
+  recordPlayerPosition(username, new Vec3(Number(match[1]), Number(match[2]), Number(match[3])))
+  schedulePositionPoll(400)
+}
+
+function samplePlayerActivity() {
+  if (!bot?.entity) return
 
   if (currentAction === 'appearing' && currentTarget && apparitionPosition && targetStartPosition) {
     const target = bot.players[currentTarget]?.entity
@@ -246,18 +301,16 @@ function findIdleTarget() {
   if (!bot?.entity) return null
   const now = Date.now()
   let best = null
-  let bestDistance = Infinity
+  let longestIdle = 0
 
-  for (const [username, player] of Object.entries(bot.players)) {
-    const entity = player.entity
-    const activity = playerActivity.get(username)
-    if (!entity || !activity || username === bot.username || entity.type !== 'player') continue
+  for (const [username, activity] of playerActivity.entries()) {
+    if (!bot.players[username] || username === bot.username) continue
     if ((now - activity.lastMovedAt) / 1000 < IDLE_SECONDS) continue
     if ((playerCooldowns.get(username) || 0) > now) continue
-    const distance = bot.entity.position.distanceTo(entity.position)
-    if (distance >= bestDistance) continue
-    best = { username, entity, distance }
-    bestDistance = distance
+    const idleFor = now - activity.lastMovedAt
+    if (idleFor <= longestIdle) continue
+    best = { username, position: activity.position.clone(), idleFor }
+    longestIdle = idleFor
   }
   return best
 }
@@ -272,14 +325,14 @@ function scheduleTroll(delay = 2500) {
 }
 
 function teleportNearPlayer(target) {
-  if (!bot?.entity || !target?.entity) return
+  if (!bot?.entity || !target?.position) return
 
   previousPosition = bot.entity.position.clone()
   currentTarget = target.username
   currentAction = 'preparing'
-  log('Target selected: ' + target.username + '; distance=' + target.distance.toFixed(1) + ' blocks. Loading target chunks.')
+  log('Target selected: ' + target.username + '; idle for ' + Math.floor(target.idleFor / 1000) + ' seconds. Loading target chunks.')
 
-  teleportTo(target.entity.position, 'move near ' + target.username + ' to load chunks', success => {
+  teleportTo(target.position, 'move near ' + target.username + ' to load chunks', success => {
     if (!connected || currentAction !== 'preparing') return
     if (!success) {
       log('Could not reach ' + target.username + ' to load target chunks.')
@@ -354,7 +407,10 @@ function connectMinecraft() {
   }
 
   bot.on('login', () => log('Minecraft login successful.'))
-  bot.on('messagestr', (message, position) => log('Server message [' + (position || 'unknown') + ']: ' + message))
+  bot.on('messagestr', (message, position) => {
+    handlePositionResponse(message)
+    log('Server message [' + (position || 'unknown') + ']: ' + message)
+  })
 
   bot.once('spawn', () => {
     connected = true
@@ -363,15 +419,18 @@ function connectMinecraft() {
     reconnectDelay = 5000
     playerActivity.clear()
     playerCooldowns.clear()
+    pendingPositionQuery = null
+    positionQueryIndex = 0
+    if (positionPollTimer) clearTimeout(positionPollTimer)
+    if (positionQueryTimeout) clearTimeout(positionQueryTimeout)
+    positionPollTimer = null
+    positionQueryTimeout = null
     resetTrollState()
     log('Herobrine has entered the world.')
+    schedulePositionPoll(1000)
     if (TROLL_ENABLED) {
-      log('Teleport scare behavior enabled.')
-      trollTimer = setTimeout(() => {
-        trollTimer = null
-        samplePlayerActivity()
-        scheduleTroll(1500)
-      }, 2000)
+      log('Teleport scare behavior enabled. Remote position polling is active.')
+      scheduleTroll(1500)
     }
   })
 
@@ -389,6 +448,11 @@ function connectMinecraft() {
   bot.once('end', reason => {
     connected = false
     resetTrollState()
+    if (positionPollTimer) clearTimeout(positionPollTimer)
+    if (positionQueryTimeout) clearTimeout(positionQueryTimeout)
+    positionPollTimer = null
+    positionQueryTimeout = null
+    pendingPositionQuery = null
     playerActivity.clear()
     log('Herobrine disconnected: ' + (reason || 'connection ended'))
     bot = null
