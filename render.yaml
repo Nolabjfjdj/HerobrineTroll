@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: herobrinetroll
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: MC_HOST
+        sync: false
+      - key: MC_PORT
+        value: "25565"
+      - key: MC_VERSION
+        value: "1.21.4"
