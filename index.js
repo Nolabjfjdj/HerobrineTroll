@@ -202,13 +202,13 @@ function playerIsLookingAtHerobrine(entity) {
   return dot >= LOOK_DOT_THRESHOLD
 }
 
-function recordPlayerPosition(username, position) {
+function recordPlayerWalkScore(username, score) {
   const now = Date.now()
   const previous = playerActivity.get(username)
-  if (!previous || previous.position.distanceTo(position) > 0.35) {
-    playerActivity.set(username, { position: position.clone(), lastMovedAt: now })
+  if (!previous || previous.walkScore !== score) {
+    playerActivity.set(username, { walkScore: score, lastMovedAt: now })
   } else {
-    previous.position = position.clone()
+    previous.walkScore = score
   }
 }
 
@@ -249,28 +249,29 @@ function pollRemotePlayerPositions() {
   const username = usernames[positionQueryIndex]
   positionQueryIndex = (positionQueryIndex + 1) % usernames.length
   pendingPositionQuery = username
-  log('Querying position of ' + username + ' through the server.')
-  bot.chat('/data get entity ' + username + ' Pos')
+  log('Querying walk statistic of ' + username + ' through the server.')
+  bot.chat('/scoreboard players get ' + username + ' ht_walk')
 
   positionQueryTimeout = setTimeout(() => {
     if (pendingPositionQuery !== username) return
     pendingPositionQuery = null
     positionQueryTimeout = null
-    log('Position query timed out for ' + username + '.')
+    log('Walk statistic query timed out for ' + username + '. Check that the ht_walk objective exists and Herobrine has permission to use commands.')
     schedulePositionPoll(1000)
   }, 3000)
 }
 
 function handlePositionResponse(message) {
   if (!pendingPositionQuery) return
-  const match = message.match(/\[\s*(-?\d+(?:\.\d+)?)[dDfF]?\s*,\s*(-?\d+(?:\.\d+)?)[dDfF]?\s*,\s*(-?\d+(?:\.\d+)?)[dDfF]?\s*\]/)
+  const username = pendingPositionQuery
+  const escapedUsername = username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = message.match(new RegExp('(?:^|\\s)' + escapedUsername + '\\s+has\\s+(-?\\d+)\\s+\\[ht_walk\\]'))
   if (!match) return
 
-  const username = pendingPositionQuery
   if (positionQueryTimeout) clearTimeout(positionQueryTimeout)
   positionQueryTimeout = null
   pendingPositionQuery = null
-  recordPlayerPosition(username, new Vec3(Number(match[1]), Number(match[2]), Number(match[3])))
+  recordPlayerWalkScore(username, Number(match[1]))
   schedulePositionPoll(400)
 }
 
@@ -309,7 +310,7 @@ function findIdleTarget() {
     if ((playerCooldowns.get(username) || 0) > now) continue
     const idleFor = now - activity.lastMovedAt
     if (idleFor <= longestIdle) continue
-    best = { username, position: activity.position.clone(), idleFor }
+    best = { username, idleFor }
     longestIdle = idleFor
   }
   return best
@@ -325,56 +326,47 @@ function scheduleTroll(delay = 2500) {
 }
 
 function teleportNearPlayer(target) {
-  if (!bot?.entity || !target?.position) return
+  if (!bot?.entity || !target?.username) return
 
   previousPosition = bot.entity.position.clone()
   currentTarget = target.username
   currentAction = 'preparing'
-  log('Target selected: ' + target.username + '; idle for ' + Math.floor(target.idleFor / 1000) + ' seconds. Loading target chunks.')
+  log('Target selected: ' + target.username + '; idle for ' + Math.floor(target.idleFor / 1000) + ' seconds. Teleporting to load target chunks.')
+  log('Teleporting Herobrine directly to ' + target.username + '.')
+  bot.chat('/minecraft:teleport ' + bot.username + ' ' + target.username)
 
-  teleportTo(target.position, 'move near ' + target.username + ' to load chunks', success => {
+  setTimeout(() => {
     if (!connected || currentAction !== 'preparing') return
-    if (!success) {
-      log('Could not reach ' + target.username + ' to load target chunks.')
+    const refreshedTarget = bot.players[target.username]
+    if (!refreshedTarget?.entity) {
+      log('Could not load ' + target.username + ' after the player teleport.')
       playerCooldowns.set(target.username, Date.now() + 15000)
-      currentAction = 'waiting'
-      currentTarget = null
-      previousPosition = null
-      scheduleTroll(5000)
+      returnToPreviousPosition('target entity did not load after teleport')
       return
     }
 
-    setTimeout(() => {
-      if (!connected || currentAction !== 'preparing') return
-      const refreshedTarget = bot.players[target.username]
-      if (!refreshedTarget?.entity) {
-        returnToPreviousPosition('target disappeared while loading chunks')
+    const safePosition = findVisibleSafePosition(refreshedTarget)
+    if (!safePosition) {
+      log('No safe solid block found near ' + target.username + ' after loading target chunks.')
+      returnToPreviousPosition('no safe apparition position was found')
+      return
+    }
+
+    targetStartPosition = refreshedTarget.entity.position.clone()
+    apparitionPosition = safePosition
+    currentAction = 'appearing'
+    log('Trying to appear in ' + target.username + ' view at ' + safePosition.toString())
+
+    teleportTo(apparitionPosition, 'appear in front of ' + target.username, appeared => {
+      if (!connected || currentAction !== 'appearing') return
+      if (!appeared) {
+        playerCooldowns.set(target.username, Date.now() + 15000)
+        returnToPreviousPosition('apparition teleport failed')
         return
       }
-
-      const safePosition = findVisibleSafePosition(refreshedTarget)
-      if (!safePosition) {
-        log('No safe solid block found near ' + target.username + ' after loading target chunks.')
-        returnToPreviousPosition('no safe apparition position was found')
-        return
-      }
-
-      targetStartPosition = refreshedTarget.entity.position.clone()
-      apparitionPosition = safePosition
-      currentAction = 'appearing'
-      log('Trying to appear in ' + target.username + ' view at ' + safePosition.toString())
-
-      teleportTo(apparitionPosition, 'appear in front of ' + target.username, appeared => {
-        if (!connected || currentAction !== 'appearing') return
-        if (!appeared) {
-          playerCooldowns.set(target.username, Date.now() + 15000)
-          returnToPreviousPosition('apparition teleport failed')
-          return
-        }
-        returnTimer = setTimeout(() => returnToPreviousPosition('five-second appearance ended'), APPEAR_SECONDS * 1000)
-      })
-    }, 1800)
-  })
+      returnTimer = setTimeout(() => returnToPreviousPosition('five-second appearance ended'), APPEAR_SECONDS * 1000)
+    })
+  }, 1800)
 }
 
 function runTrollStep() {
