@@ -389,6 +389,21 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       }
     }
     if (authorizedPlayers.has(usernameFromChat)) {
+      const followMatch = message.trim().match(/^suis\\s+([A-Za-z0-9_]{1,16})$/i)
+      if (followMatch && followMatch[1].toLowerCase() !== 'moi') {
+        const targetName = followMatch[1]
+        const target = bot.players[targetName]?.entity
+        if (!target) {
+          bot.chat('Je ne vois pas ce joueur. Vérifie son pseudo et assure-toi qu’il est connecté.')
+          return
+        }
+        giveRequest = null
+        followTarget = target.username || targetName
+        stopCombat()
+        bot.pathfinder.setGoal(new goals.GoalFollow(target, 2), true)
+        bot.chat('Ok, je suis maintenant ' + followTarget + '.')
+        return
+      }
       const taskCommand = message.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\s-'’]+/g, '')
       if (['vacouperdubois', 'vacasserdubois', 'vacouperdesarbres', 'vaabattredesarbres'].includes(taskCommand)) {
         runHarvestTask('wood')
@@ -519,8 +534,9 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       movements.allow1by1towers = false
       movements.scafoldingBlocks = []
       const isWoodenDoorBlock = block => Boolean(block && /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|pale_oak|crimson|warped)_door$/.test(block.name))
+      const isWoodenTrapdoorBlock = block => Boolean(block && /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|bamboo|pale_oak|crimson|warped)_trapdoor$/.test(block.name))
       for (const block of bot.registry.blocksArray) {
-        if (isWoodenDoorBlock(block)) movements.openable.add(block.id)
+        if (isWoodenDoorBlock(block) || isWoodenTrapdoorBlock(block)) movements.openable.add(block.id)
       }
       const originalGetBlock = movements.getBlock.bind(movements)
       movements.getBlock = function (pos, dx, dy, dz) {
@@ -530,12 +546,15 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
           const lowerBlock = properties.half === 'upper' ? bot.blockAt(block.position.offset(0, -1, 0)) : block
           const lowerProperties = lowerBlock?.getProperties?.() || lowerBlock?._properties || {}
           block.openable = lowerProperties.open !== true
+        } else if (isWoodenTrapdoorBlock(block)) {
+          const properties = block.getProperties?.() || block._properties || {}
+          block.openable = properties.open !== true
         }
         return block
       }
       const originalSafeOrBreak = movements.safeOrBreak.bind(movements)
       movements.safeOrBreak = function (block, toBreak) {
-        if (isWoodenDoorBlock(block)) {
+        if (isWoodenDoorBlock(block) || isWoodenTrapdoorBlock(block)) {
           return this.exclusionStep(block) + this.getNumEntitiesAt(block.position, 0, 0, 0) * this.entityCost
         }
         return originalSafeOrBreak(block, toBreak)
