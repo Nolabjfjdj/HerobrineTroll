@@ -2,7 +2,7 @@ const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
 const { plugin: pvp } = require('mineflayer-pvp')
 
 module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
-  const username = 'mp5_123'
+  const username = 'JeSuisUnBot'
   let bot = null
   let connected = false
   let stopping = false
