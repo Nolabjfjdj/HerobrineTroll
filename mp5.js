@@ -21,6 +21,8 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   let ignoredLookEntityId = null
   let activeTask = null
   let taskGeneration = 0
+  let eatingFood = false
+  let lastNoFoodWarningAt = 0
   const authorizedPlayers = new Set([owner, 'Itzhugoo12'])
   const swingTimes = new Map()
 
@@ -175,6 +177,65 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       lastLookAt = now
       const eyeTarget = nearby.position.offset(0, Math.min(nearby.height || 1.2, 1.6), 0)
       bot.lookAt(eyeTarget).catch(error => log('Could not look at nearby entity: ' + error.message))
+    }
+  }
+
+  async function tryAutoEat() {
+    if (!connected || !bot || eatingFood || bot.food > 14 || bot.currentWindow) return
+    const foodPriority = [
+      'golden_carrot',
+      'cooked_beef',
+      'cooked_porkchop',
+      'cooked_mutton',
+      'cooked_chicken',
+      'cooked_rabbit',
+      'cooked_salmon',
+      'cooked_cod',
+      'baked_potato',
+      'bread',
+      'pumpkin_pie',
+      'cooked_fish',
+      'apple',
+      'carrot',
+      'melon_slice',
+      'sweet_berries',
+      'glow_berries',
+      'beetroot',
+      'dried_kelp'
+    ]
+    const inventory = bot.inventory.items()
+    let food = null
+    for (const name of foodPriority) {
+      food = inventory.find(item => item.name === name)
+      if (food) break
+    }
+    if (!food) {
+      if (Date.now() - lastNoFoodWarningAt > 60000) {
+        lastNoFoodWarningAt = Date.now()
+        log('Hungry, but no suitable food is available in the inventory.')
+      }
+      return
+    }
+    eatingFood = true
+    const previousHeldItem = bot.heldItem
+    try {
+      await bot.equip(food, 'hand')
+      await bot.consume()
+      log('Automatically ate ' + food.name + '. Food level: ' + bot.food + '/20.')
+    } catch (error) {
+      log('Automatic eating failed: ' + error.message)
+    } finally {
+      if (connected && bot && previousHeldItem) {
+        const itemToRestore = bot.inventory.items().find(item => item.type === previousHeldItem.type)
+        if (itemToRestore) {
+          try {
+            await bot.equip(itemToRestore, 'hand')
+          } catch (error) {
+            log('Could not restore held item after eating: ' + error.message)
+          }
+        }
+      }
+      eatingFood = false
     }
   }
 
@@ -495,6 +556,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       }
     })
     bot.on('physicsTick', () => {
+      tryAutoEat()
       if (giveRequest && !givingItems && connected && bot) {
         const requesterEntity = bot.players[giveRequest.requester]?.entity
         if (!requesterEntity) {
