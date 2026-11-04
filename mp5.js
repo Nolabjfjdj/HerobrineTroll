@@ -389,7 +389,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       }
     }
     if (authorizedPlayers.has(usernameFromChat)) {
-      const followMatch = message.trim().match(/^suis\\s+([A-Za-z0-9_]{1,16})$/i)
+      const followMatch = message.trim().match(/^suis\s+([A-Za-z0-9_]{1,16})$/i)
       if (followMatch && followMatch[1].toLowerCase() !== 'moi') {
         const targetName = followMatch[1]
         const target = bot.players[targetName]?.entity
