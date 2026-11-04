@@ -358,6 +358,100 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0] || null
   }
 
+  function findNearbyChest() {
+    const chestNames = new Set(['chest', 'trapped_chest'])
+    const positions = bot.findBlocks({
+      matching: block => Boolean(block && chestNames.has(block.name)),
+      maxDistance: 32,
+      count: 30
+    })
+    return positions
+      .map(position => bot.blockAt(position))
+      .filter(block => block && chestNames.has(block.name))
+      .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0] || null
+  }
+
+  async function runChestTask(action, query) {
+    if (activeTask) {
+      bot.chat('Je suis déjà occupé. Dis-moi « arrête » pour annuler.')
+      return
+    }
+    const generation = ++taskGeneration
+    activeTask = 'chest'
+    followTarget = null
+    giveRequest = null
+    stopCombat()
+    bot.chat(action === 'deposit'
+      ? 'Je cherche un coffre pour y ranger les objets.'
+      : 'Je cherche un coffre pour récupérer cet objet.')
+    let container = null
+    let transferred = 0
+    try {
+      const chest = findNearbyChest()
+      if (!chest) {
+        bot.chat('Je ne trouve aucun coffre à proximité.')
+        return
+      }
+      await bot.pathfinder.goto(new goals.GoalNear(chest.position.x, chest.position.y, chest.position.z, 2))
+      if (!connected || !bot || taskGeneration !== generation) return
+      const currentChest = bot.blockAt(chest.position)
+      if (!currentChest || !['chest', 'trapped_chest'].includes(currentChest.name)) {
+        bot.chat('Le coffre n’est plus accessible.')
+        return
+      }
+      container = await bot.openContainer(currentChest)
+      if (!connected || !bot || taskGeneration !== generation) return
+      if (action === 'deposit') {
+        const items = bot.inventory.items().filter(item => !query || itemMatchesQuery(item, query))
+        for (const item of items) {
+          if (!connected || !bot || taskGeneration !== generation) break
+          const current = bot.inventory.items().find(entry =>
+            entry.type === item.type &&
+            entry.metadata === item.metadata &&
+            itemMatchesQuery(entry, query)
+          )
+          if (!current) continue
+          await container.deposit(current.type, current.metadata ?? null, current.count)
+          transferred += current.count
+        }
+      } else {
+        const items = container.slots
+          .slice(0, container.inventoryStart)
+          .filter(item => item && itemMatchesQuery(item, query))
+        for (const item of items) {
+          if (!connected || !bot || taskGeneration !== generation) break
+          await container.withdraw(item.type, item.metadata ?? null, item.count)
+          transferred += item.count
+        }
+      }
+      if (connected && bot && taskGeneration === generation) {
+        if (transferred > 0) {
+          bot.chat(action === 'deposit'
+            ? 'C’est rangé. J’ai déposé ' + transferred + ' objet(s).'
+            : 'Voilà. J’ai récupéré ' + transferred + ' objet(s).')
+        } else {
+          bot.chat(action === 'deposit'
+            ? 'Je n’ai trouvé aucun objet correspondant dans mon inventaire.'
+            : 'Je n’ai pas trouvé cet objet dans le coffre.')
+        }
+      }
+    } catch (error) {
+      if (connected && bot && taskGeneration === generation) {
+        log('Chest task failed: ' + error.message)
+        bot.chat('Je n’ai pas réussi à utiliser le coffre.')
+      }
+    } finally {
+      if (container) {
+        try {
+          await container.close()
+        } catch (error) {
+          log('Could not close chest window: ' + error.message)
+        }
+      }
+      if (taskGeneration === generation) activeTask = null
+    }
+  }
+
   function stopActiveTask() {
     if (!activeTask) return false
     taskGeneration++
@@ -518,6 +612,23 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       return
     }
 
+    {
+      const depositAllMatch = normalizedMessage.match(/^range (?:tout|mon inventaire|mes objets)$/i)
+      const depositItemMatch = normalizedMessage.match(/^range (.{1,32})$/i)
+      const withdrawMatch = normalizedMessage.match(/^prends (.{1,32})$/i)
+      if (depositAllMatch) {
+        runChestTask('deposit', '')
+        return
+      }
+      if (depositItemMatch) {
+        runChestTask('deposit', canonicalItemText(depositItemMatch[1]))
+        return
+      }
+      if (withdrawMatch) {
+        runChestTask('withdraw', canonicalItemText(withdrawMatch[1]))
+        return
+      }
+    }
     {
       const request = parseGiveRequest(message)
       if (request) {
