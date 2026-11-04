@@ -342,9 +342,11 @@ function teleportNearPlayer(target) {
   previousPosition = bot.entity.position.clone()
   currentTarget = target.username
   currentAction = 'preparing'
-  log('Target selected: ' + target.username + '; idle for ' + Math.floor(target.idleFor / 1000) + ' seconds. Teleporting to load target chunks.')
-  log('Teleporting Herobrine directly to ' + target.username + '.')
-  bot.chat('/tp ' + bot.username + ' ' + target.username)
+  log('Target selected: ' + target.username + '; idle for ' + Math.floor(target.idleFor / 1000) + ' seconds. Teleporting near the player without overlapping them.')
+  const initialDistance = 7 + Math.floor(Math.random() * 4)
+  const initialCommand = '/execute at ' + target.username + ' rotated as ' + target.username + ' run tp ' + bot.username + ' ^ ^ ^' + initialDistance
+  log('Initial appearance teleport: ' + initialCommand)
+  bot.chat(initialCommand)
 
   setTimeout(() => {
     if (!connected || currentAction !== 'preparing') return
