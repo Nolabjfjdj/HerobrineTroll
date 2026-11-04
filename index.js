@@ -446,7 +446,7 @@ function handleChatCommand(username, message) {
 
       bot.chat('/execute at ' + DIRT_TARGET + ' run summon item ~ ~2 ~ {Item:{id:"minecraft:dirt",count:1}}')
       index += 1
-      setTimeout(dropNextStack, 25)
+      setTimeout(dropNextStack, 5)
     }
 
     dropNextStack()
