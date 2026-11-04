@@ -25,6 +25,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   let lastNoFoodWarningAt = 0
   const authorizedPlayers = new Set([owner, 'Itzhugoo12'])
   const protectedPlayers = new Set(Array.from(authorizedPlayers, player => player.toLowerCase()))
+  const rememberedPositions = new Map()
   const swingTimes = new Map()
 
   function log(message) {
@@ -459,6 +460,64 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         return
       }
     }
+    const normalizedMessage = message.trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')
+    const rememberMatch = normalizedMessage.match(/^memorise\\s+(.{1,32})$/i)
+    const goPositionMatch = normalizedMessage.match(/^va a\\s+(.{1,32})$/i)
+    const forgetPositionMatch = normalizedMessage.match(/^oublie\\s+(.{1,32})$/i)
+    const normalizePositionName = value => value.trim().replace(/\\s+/g, ' ').toLowerCase()
+    if (rememberMatch) {
+      const name = rememberMatch[1].trim().replace(/\\s+/g, ' ')
+      if (!name || !bot.entity?.position) {
+        bot.chat('Je ne peux pas enregistrer cette position maintenant.')
+        return
+      }
+      rememberedPositions.set(normalizePositionName(name), {
+        name,
+        x: Math.floor(bot.entity.position.x),
+        y: Math.floor(bot.entity.position.y),
+        z: Math.floor(bot.entity.position.z),
+        dimension: bot.game.dimension
+      })
+      bot.chat('Position « ' + name + ' » mémorisée.')
+      return
+    }
+    if (normalizedMessage === 'positions' || normalizedMessage === 'liste positions') {
+      const saved = Array.from(rememberedPositions.values())
+      bot.chat(saved.length
+        ? 'Positions : ' + saved.map(position => position.name).join(', ')
+        : 'Je n’ai aucune position mémorisée.')
+      return
+    }
+    if (forgetPositionMatch) {
+      const name = forgetPositionMatch[1].trim().replace(/\\s+/g, ' ')
+      const key = normalizePositionName(name)
+      if (rememberedPositions.delete(key)) bot.chat('Position « ' + name + ' » oubliée.')
+      else bot.chat('Je ne connais pas la position « ' + name + ' ».')
+      return
+    }
+    if (goPositionMatch) {
+      const name = goPositionMatch[1].trim().replace(/\\s+/g, ' ')
+      const position = rememberedPositions.get(normalizePositionName(name))
+      if (!position) {
+        bot.chat('Je ne connais pas la position « ' + name + ' ».')
+        return
+      }
+      if (position.dimension !== bot.game.dimension) {
+        bot.chat('Cette position est dans une autre dimension.')
+        return
+      }
+      if (activeTask) {
+        bot.chat('Je suis déjà occupé. Dis-moi « arrête » avant de changer de destination.')
+        return
+      }
+      followTarget = null
+      giveRequest = null
+      stopCombat()
+      bot.pathfinder.setGoal(new goals.GoalNear(position.x, position.y, position.z, 1))
+      bot.chat('Je vais à la position « ' + position.name + ' ».')
+      return
+    }
+
     {
       const request = parseGiveRequest(message)
       if (request) {
