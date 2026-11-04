@@ -432,10 +432,10 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
 
   function handleChat(usernameFromChat, message) {
     if (usernameFromChat === username || !connected || !bot) return
-    const normalizedOwnerCommand = message.trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')
+    const normalizedOwnerCommand = message.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     if (usernameFromChat.toLowerCase() === String(owner).toLowerCase()) {
-      const protectMatch = normalizedOwnerCommand.match(/^protege\\s+([A-Za-z0-9_]{1,16})$/i)
-      const unprotectMatch = normalizedOwnerCommand.match(/^arrete de proteger\\s+([A-Za-z0-9_]{1,16})$/i)
+      const protectMatch = normalizedOwnerCommand.match(/^protege\s+([A-Za-z0-9_]{1,16})$/i)
+      const unprotectMatch = normalizedOwnerCommand.match(/^arrete de proteger\s+([A-Za-z0-9_]{1,16})$/i)
       if (protectMatch) {
         const targetName = protectMatch[1]
         const key = targetName.toLowerCase()
