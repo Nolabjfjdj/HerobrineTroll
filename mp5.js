@@ -15,6 +15,11 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   let giveRequest = null
   let givingItems = false
   let followTarget = null
+  let doorActionAt = 0
+  let lookTargetId = null
+  let lookUntil = 0
+  let lastLookAt = 0
+  let ignoredLookEntityId = null
   const authorizedPlayers = new Set([owner, 'Itzhugoo12'])
   const swingTimes = new Map()
 
@@ -43,36 +48,44 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       .replace(/\b(le|la|les|du|de|des|un|une|l)\b/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
-    const aliases = {
-      lit: 'bed',
-      rouge: 'red',
-      bleu: 'blue',
-      vert: 'green',
-      blanc: 'white',
-      noir: 'black',
-      jaune: 'yellow',
-      orange: 'orange',
-      violet: 'purple',
-      rose: 'pink',
-      gris: 'gray',
-      marron: 'brown',
-      coffre: 'chest',
-      planches: 'planks',
-      terre: 'dirt',
-      pierre: 'stone',
-      bois: 'wood'
-    }
-    query = query.split(' ').map(word => aliases[word] || word).join(' ').trim()
+    query = canonicalItemText(query)
     return { query }
+  }
+
+  const itemAliases = {
+    torche: 'torch',
+    torches: 'torch',
+    torch: 'torch',
+    lit: 'bed',
+    lits: 'bed',
+    rouge: 'red',
+    bleu: 'blue',
+    vert: 'green',
+    blanc: 'white',
+    noir: 'black',
+    jaune: 'yellow',
+    orange: 'orange',
+    violet: 'purple',
+    rose: 'pink',
+    gris: 'gray',
+    marron: 'brown',
+    coffre: 'chest',
+    coffres: 'chest',
+    planches: 'planks',
+    terre: 'dirt',
+    pierre: 'stone',
+    bois: 'wood'
+  }
+
+  function canonicalItemText(value) {
+    return normalizeItemText(value).split(' ').map(word => itemAliases[word] || word).join(' ')
   }
 
   function itemMatchesQuery(item, query) {
     if (!query) return true
-    const names = [
-      normalizeItemText(item.name),
-      normalizeItemText(item.displayName)
-    ]
-    const words = query.split(' ').filter(Boolean)
+    const canonicalQuery = canonicalItemText(query)
+    const words = canonicalQuery.split(' ').filter(Boolean)
+    const names = [item.name, item.displayName].filter(Boolean).map(canonicalItemText)
     return names.some(name => words.every(word => name.includes(word)))
   }
 
@@ -121,6 +134,78 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
           bot.pathfinder.setGoal(null)
         }
       }
+    }
+  }
+
+  function tryOpenNearbyDoor() {
+    if (!bot || !connected || !bot.entity || !bot.pathfinder?.goal) return
+    const now = Date.now()
+    if (now - doorActionAt < 1200) return
+    const origin = bot.entity.position.floored()
+    let nearestDoor = null
+    let nearestDistance = 3.2
+    for (let x = -1; x <= 1; x++) {
+      for (let z = -1; z <= 1; z++) {
+        for (let y = 0; y <= 1; y++) {
+          const block = bot.blockAt(origin.offset(x, y, z))
+          if (!block || !/_door$/.test(block.name) || /iron_door$/.test(block.name)) continue
+          const properties = block.getProperties?.() || block._properties || {}
+          if (properties.half && properties.half !== 'lower') continue
+          if (properties.open === true) continue
+          const distance = block.position.distanceTo(bot.entity.position)
+          if (distance <= nearestDistance) {
+            nearestDoor = block
+            nearestDistance = distance
+          }
+        }
+      }
+    }
+    if (!nearestDoor) return
+    doorActionAt = now
+    bot.activateBlock(nearestDoor).then(() => {
+      log('Interacted with nearby door: ' + nearestDoor.name + '.')
+    }).catch(error => {
+      log('Could not open nearby door: ' + error.message)
+    })
+  }
+
+  function updateIdleLook() {
+    if (!bot || !connected || !bot.entity) return
+    if (giveRequest || givingItems || followTarget || playerTarget || bot.pathfinder?.goal) {
+      lookTargetId = null
+      ignoredLookEntityId = null
+      return
+    }
+    const origin = bot.entity.position
+    const nearby = Object.values(bot.entities)
+      .filter(entity =>
+        entity.id !== bot.entity.id &&
+        (entity.type === 'player' || entity.type === 'mob') &&
+        entity.position &&
+        entity.position.distanceTo(origin) <= 4.5
+      )
+      .sort((a, b) => a.position.distanceTo(origin) - b.position.distanceTo(origin))[0]
+    if (!nearby) {
+      lookTargetId = null
+      ignoredLookEntityId = null
+      return
+    }
+    const now = Date.now()
+    if (lookTargetId !== nearby.id) {
+      if (ignoredLookEntityId === nearby.id) return
+      lookTargetId = nearby.id
+      lookUntil = now + 2500
+      lastLookAt = 0
+    }
+    if (now >= lookUntil) {
+      ignoredLookEntityId = nearby.id
+      lookTargetId = null
+      return
+    }
+    if (now - lastLookAt >= 400) {
+      lastLookAt = now
+      const eyeTarget = nearby.position.offset(0, Math.min(nearby.height || 1.2, 1.6), 0)
+      bot.lookAt(eyeTarget).catch(error => log('Could not look at nearby entity: ' + error.message))
     }
   }
 
@@ -297,6 +382,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       }
     })
     bot.on('physicsTick', () => {
+      tryOpenNearbyDoor()
       if (giveRequest && !givingItems && connected && bot) {
         const requesterEntity = bot.players[giveRequest.requester]?.entity
         if (!requesterEntity) {
@@ -309,6 +395,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         }
         return
       }
+      updateIdleLook()
       if (!connected || !bot || !playerTarget || !playerHitPending) return
       const target = playerTarget
       if (!bot.entities[target.id] || !target.position || !bot.entity?.position) {
