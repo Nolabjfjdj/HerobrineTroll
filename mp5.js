@@ -12,10 +12,96 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   let recentAttackerAt = 0
   let playerTarget = null
   let playerHitPending = false
+  let giveRequest = null
+  let givingItems = false
   const swingTimes = new Map()
 
   function log(message) {
     console.log('[mp5_123] ' + message)
+  }
+
+  function normalizeItemText(value) {
+    return String(value || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/minecraft:/g, '')
+      .replace(/[_-]+/g, ' ')
+      .replace(/[^a-z0-9 ]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  function parseGiveRequest(message) {
+    const match = message.trim().match(/^donne\s+(?:tout\s+)?(.+)?$/i)
+    if (!match) return null
+    let query = normalizeItemText(match[1] || '')
+    query = query
+      .replace(/\b(que tu as|que t as|dans ton inventaire|dans inventaire|de ton inventaire|stp|svp)\b/g, ' ')
+      .replace(/\b(le|la|les|du|de|des|un|une|l)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    const aliases = {
+      lit: 'bed',
+      rouge: 'red',
+      bleu: 'blue',
+      vert: 'green',
+      blanc: 'white',
+      noir: 'black',
+      jaune: 'yellow',
+      orange: 'orange',
+      violet: 'purple',
+      rose: 'pink',
+      gris: 'gray',
+      marron: 'brown',
+      coffre: 'chest',
+      planches: 'planks',
+      terre: 'dirt',
+      pierre: 'stone',
+      bois: 'wood'
+    }
+    query = query.split(' ').map(word => aliases[word] || word).join(' ').trim()
+    return { query }
+  }
+
+  function itemMatchesQuery(item, query) {
+    if (!query) return true
+    const names = [
+      normalizeItemText(item.name),
+      normalizeItemText(item.displayName)
+    ]
+    const words = query.split(' ').filter(Boolean)
+    return names.some(name => words.every(word => name.includes(word)))
+  }
+
+  async function giveRequestedItems() {
+    if (!connected || !bot || !giveRequest || givingItems) return
+    givingItems = true
+    const request = giveRequest
+    giveRequest = null
+    try {
+      const items = bot.inventory.items().filter(item => itemMatchesQuery(item, request.query))
+      if (!items.length) {
+        bot.chat(request.query ? 'Je ne trouve pas cet objet dans mon inventaire.' : 'Mon inventaire est vide.')
+        return
+      }
+      let transferred = 0
+      for (const item of items) {
+        if (!connected || !bot) break
+        const current = bot.inventory.items().find(entry => entry.type === item.type)
+        if (!current) continue
+        await bot.tossStack(current)
+        transferred += current.count
+      }
+      if (transferred > 0) bot.chat('Tiens, je t’ai donné ' + transferred + ' objet(s).')
+      else bot.chat('Je n’ai rien pu te donner.')
+      log('Transferred ' + transferred + ' item(s) to ' + owner + '.')
+    } catch (error) {
+      log('Could not give items: ' + error.message)
+      if (connected && bot) bot.chat('Je n’ai pas réussi à te donner les objets.')
+    } finally {
+      givingItems = false
+    }
   }
 
   function stopCombat() {
