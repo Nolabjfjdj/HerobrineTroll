@@ -20,6 +20,8 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   let lookUntil = 0
   let lastLookAt = 0
   let ignoredLookEntityId = null
+  let activeTask = null
+  let taskGeneration = 0
   const authorizedPlayers = new Set([owner, 'Itzhugoo12'])
   const swingTimes = new Map()
 
@@ -295,6 +297,116 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       .sort((a, b) => a.position.distanceTo(ownerEntity.position) - b.position.distanceTo(ownerEntity.position))[0] || null
   }
 
+  function isLogBlock(block) {
+    return Boolean(block && /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|pale_oak|crimson|warped)_log$/.test(block.name))
+  }
+
+  function findTreeLogs() {
+    const groundNames = /^(grass_block|dirt|coarse_dirt|rooted_dirt|podzol|mycelium|moss_block|mud|muddy_mangrove_roots)$/
+    const leavesPattern = /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|azalea|flowering_azalea|pale_oak)_leaves$/
+    const positions = bot.findBlocks({ matching: block => isLogBlock(block), maxDistance: 24, count: 60 })
+    const bases = positions.map(position => bot.blockAt(position)).filter(block => {
+      if (!block || !groundNames.test(bot.blockAt(block.position.offset(0, -1, 0))?.name || '')) return false
+      let height = 0
+      while (height < 12 && isLogBlock(bot.blockAt(block.position.offset(0, height, 0)))) height++
+      if (height < 2) return false
+      for (let y = height - 1; y <= height + 4; y++) {
+        for (let x = -5; x <= 5; x++) {
+          for (let z = -5; z <= 5; z++) {
+            const nearby = bot.blockAt(block.position.offset(x, y, z))
+            if (nearby && leavesPattern.test(nearby.name)) return true
+          }
+        }
+      }
+      return false
+    }).sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))
+    if (!bases.length) return []
+    const base = bases[0]
+    const logs = []
+    for (let height = 0; height < 12; height++) {
+      const block = bot.blockAt(base.position.offset(0, height, 0))
+      if (!isLogBlock(block)) break
+      logs.push(block.position.clone())
+    }
+    return logs
+  }
+
+  function findOreBlock() {
+    const orePattern = /^(coal_ore|deepslate_coal_ore|iron_ore|deepslate_iron_ore|copper_ore|deepslate_copper_ore|gold_ore|deepslate_gold_ore|redstone_ore|deepslate_redstone_ore|lapis_ore|deepslate_lapis_ore|diamond_ore|deepslate_diamond_ore|emerald_ore|deepslate_emerald_ore|nether_gold_ore|nether_quartz_ore|ancient_debris)$/
+    const positions = bot.findBlocks({ matching: block => Boolean(block && orePattern.test(block.name)), maxDistance: 32, count: 80 })
+    return positions.map(position => bot.blockAt(position))
+      .filter(block => block && orePattern.test(block.name))
+      .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0] || null
+  }
+
+  function stopActiveTask() {
+    if (!activeTask) return false
+    taskGeneration++
+    activeTask = null
+    try {
+      bot.pathfinder.setGoal(null)
+      bot.stopDigging()
+    } catch {}
+    return true
+  }
+
+  async function runHarvestTask(kind) {
+    if (activeTask) {
+      bot.chat('Je suis déjà occupé. Dis-moi « arrête » pour annuler.')
+      return
+    }
+    const generation = ++taskGeneration
+    activeTask = kind
+    followTarget = null
+    stopCombat()
+    bot.chat(kind === 'wood' ? 'Je pars chercher des arbres et couper leurs troncs.' : 'Je pars chercher des minerais à proximité.')
+    const limit = kind === 'wood' ? 24 : 20
+    let harvested = 0
+    let treeQueue = []
+    try {
+      while (connected && bot && activeTask === kind && taskGeneration === generation && harvested < limit) {
+        let targetPosition
+        let expectedName
+        if (kind === 'wood') {
+          while (!treeQueue.length) {
+            treeQueue = findTreeLogs()
+            if (!treeQueue.length) break
+          }
+          targetPosition = treeQueue.shift()
+          if (!targetPosition) break
+          expectedName = 'log'
+        } else {
+          const target = findOreBlock()
+          if (!target) break
+          targetPosition = target.position.clone()
+          expectedName = target.name
+        }
+        await bot.pathfinder.goto(new goals.GoalNear(targetPosition.x, targetPosition.y, targetPosition.z, 2))
+        if (!connected || !bot || activeTask !== kind || taskGeneration !== generation) break
+        const currentBlock = bot.blockAt(targetPosition)
+        if (!currentBlock || currentBlock.name === 'air' || (kind === 'wood' ? !isLogBlock(currentBlock) : currentBlock.name !== expectedName)) continue
+        if (!bot.canDigBlock(currentBlock)) {
+          log('Cannot reach harvest target ' + currentBlock.name + '.')
+          break
+        }
+        await bot.dig(currentBlock)
+        harvested++
+      }
+      if (connected && bot && activeTask === kind && taskGeneration === generation) {
+        bot.chat(harvested
+          ? 'J’ai terminé. J’ai récolté ' + harvested + ' bloc(s).'
+          : kind === 'wood' ? 'Je n’ai pas trouvé d’arbre adapté à proximité.' : 'Je n’ai trouvé aucun minerai à proximité.')
+      }
+    } catch (error) {
+      if (connected && bot && taskGeneration === generation) {
+        log('Harvest task failed: ' + error.message)
+        bot.chat('Je n’ai pas pu continuer ma récolte.')
+      }
+    } finally {
+      if (taskGeneration === generation) activeTask = null
+    }
+  }
+
   function handleChat(usernameFromChat, message) {
     if (usernameFromChat === username || !connected || !bot) return
     if (authorizedPlayers.has(usernameFromChat)) {
@@ -316,6 +428,20 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       }
     }
     if (authorizedPlayers.has(usernameFromChat)) {
+      const taskCommand = message.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\s-'’]+/g, '')
+      if (['vacouperdubois', 'vacasserdubois', 'vacouperdesarbres', 'vaabattredesarbres'].includes(taskCommand)) {
+        runHarvestTask('wood')
+        return
+      }
+      if (['vaminer', 'mine', 'vaextrairedesminerais'].includes(taskCommand)) {
+        runHarvestTask('mine')
+        return
+      }
+      if (['arrete', 'stop', 'annule'].includes(taskCommand)) {
+        if (stopActiveTask()) bot.chat('D’accord, j’arrête ma récolte.')
+        else bot.chat('Je ne suis pas en train de récolter.')
+        return
+      }
       const normalizedCommand = message.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\s-'’]+/g, '')
       if (normalizedCommand === 'suismoi' || normalizedCommand === 'viens') {
         const target = bot.players[usernameFromChat]?.entity
