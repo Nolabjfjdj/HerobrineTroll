@@ -425,35 +425,43 @@ function handleChatCommand(username, message) {
   clearTrollTimers()
   resetTrollState()
   currentAction = 'manual_dirt_drop'
-  log('Chat trigger received from ' + username + '. Teleporting to ' + DIRT_TARGET + ' and dropping 15 stacks of dirt.')
-  bot.chat('/tp ' + bot.username + ' ' + DIRT_TARGET)
 
-  const offsets = [
-    [-2, -1], [-1, -1], [0, -1], [1, -1], [2, -1],
-    [-2, 0], [-1, 0], [0, 0], [1, 0], [2, 0],
-    [-2, 1], [-1, 1], [0, 1], [1, 1], [2, 1]
-  ]
+  const distance = 2 + Math.floor(Math.random() * 2)
+  const teleportCommand = '/execute at ' + DIRT_TARGET + ' rotated as ' + DIRT_TARGET + ' run tp ' + bot.username + ' ^ ^ ^' + distance
+  log('Chat trigger received from ' + username + '. Teleporting ' + distance + ' blocks in front of ' + DIRT_TARGET + ', facing them, then dropping 15 stacks of dirt.')
+  bot.chat(teleportCommand)
 
-  let index = 0
-  const dropNextStack = () => {
+  setTimeout(() => {
     if (!connected || !bot || currentAction !== 'manual_dirt_drop') return
-    if (index >= offsets.length) {
-      bot.chat('Cadeau livré à ' + DIRT_TARGET + ' !')
-      currentAction = 'waiting'
-      scheduleTroll(3500)
-      return
+
+    const targetEntity = bot.players[DIRT_TARGET]?.entity
+    if (targetEntity) {
+      bot.lookAt(targetEntity.position.offset(0, 1.6, 0), true, error => {
+        if (error) log('Could not face ' + DIRT_TARGET + ': ' + error.message)
+        else log('Herobrine is facing ' + DIRT_TARGET + '.')
+      })
+    } else {
+      log(DIRT_TARGET + ' entity is not currently tracked; using the facing direction from the teleport command.')
     }
 
-    const [x, z] = offsets[index]
-    const command = '/execute at ' + DIRT_TARGET + ' run summon item ~' + (x >= 0 ? '+' : '') + x + ' ~2 ~' + (z >= 0 ? '+' : '') + z + ' {Item:{id:"minecraft:dirt",count:64}}'
-    bot.chat(command)
-    index += 1
-    setTimeout(dropNextStack, 300)
-  }
+    let index = 0
+    const dropNextStack = () => {
+      if (!connected || !bot || currentAction !== 'manual_dirt_drop') return
+      if (index >= 15) {
+        bot.chat('Cadeau livré à ' + DIRT_TARGET + ' !')
+        currentAction = 'waiting'
+        scheduleTroll(3500)
+        return
+      }
 
-  setTimeout(dropNextStack, 1000)
+      bot.chat('/execute at ' + DIRT_TARGET + ' run summon item ~ ~2 ~ {Item:{id:"minecraft:dirt",count:64}}')
+      index += 1
+      setTimeout(dropNextStack, 300)
+    }
+
+    dropNextStack()
+  }, 900)
 }
-
 function connectMinecraft() {
   if (stopping || !MC_HOST) return
   log('Connecting to ' + MC_HOST + ':' + MC_PORT + ' with Minecraft ' + MC_VERSION + '...')
