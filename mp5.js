@@ -460,13 +460,13 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         return
       }
     }
-    const normalizedMessage = message.trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')
-    const rememberMatch = normalizedMessage.match(/^memorise\\s+(.{1,32})$/i)
-    const goPositionMatch = normalizedMessage.match(/^va a\\s+(.{1,32})$/i)
-    const forgetPositionMatch = normalizedMessage.match(/^oublie\\s+(.{1,32})$/i)
-    const normalizePositionName = value => value.trim().replace(/\\s+/g, ' ').toLowerCase()
+    const normalizedMessage = message.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    const rememberMatch = normalizedMessage.match(/^memorise\s+(.{1,32})$/i)
+    const goPositionMatch = normalizedMessage.match(/^va a\s+(.{1,32})$/i)
+    const forgetPositionMatch = normalizedMessage.match(/^oublie\s+(.{1,32})$/i)
+    const normalizePositionName = value => value.trim().replace(/\s+/g, ' ').toLowerCase()
     if (rememberMatch) {
-      const name = rememberMatch[1].trim().replace(/\\s+/g, ' ')
+      const name = rememberMatch[1].trim().replace(/\s+/g, ' ')
       if (!name || !bot.entity?.position) {
         bot.chat('Je ne peux pas enregistrer cette position maintenant.')
         return
@@ -489,14 +489,14 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       return
     }
     if (forgetPositionMatch) {
-      const name = forgetPositionMatch[1].trim().replace(/\\s+/g, ' ')
+      const name = forgetPositionMatch[1].trim().replace(/\s+/g, ' ')
       const key = normalizePositionName(name)
       if (rememberedPositions.delete(key)) bot.chat('Position « ' + name + ' » oubliée.')
       else bot.chat('Je ne connais pas la position « ' + name + ' ».')
       return
     }
     if (goPositionMatch) {
-      const name = goPositionMatch[1].trim().replace(/\\s+/g, ' ')
+      const name = goPositionMatch[1].trim().replace(/\s+/g, ' ')
       const position = rememberedPositions.get(normalizePositionName(name))
       if (!position) {
         bot.chat('Je ne connais pas la position « ' + name + ' ».')
