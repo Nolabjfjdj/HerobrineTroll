@@ -95,7 +95,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
 
   function handleChat(usernameFromChat, message) {
     if (usernameFromChat === username || !connected || !bot) return
-    const normalized = message.trim().toLowerCase().replace(/[\\s-]+/g, '')
+    const normalized = message.trim().toLowerCase().replace(/[\s-]+/g, '')
     if (normalized === 'weshananas') {
       bot.chat('Ouais c’est moi')
       return
@@ -191,4 +191,45 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       }
     }
   }
+}
+
+
+if (require.main === module) {
+  const mineflayer = require('mineflayer')
+  const express = require('express')
+  const app = express()
+  const PORT = Number(process.env.PORT || 10000)
+  const MC_HOST = process.env.MC_HOST
+  const MC_PORT = Number(process.env.MC_PORT || 25565)
+  const MC_VERSION = process.env.MC_VERSION || '1.21.4'
+  const OWNER = process.env.MP5_OWNER || 'NolanLaBanane415'
+  let controller = null
+
+  app.get('/', (req, res) => {
+    res.type('html').send('<main><h1>MP5</h1><p>MP5 Minecraft bot service is running.</p><p><a href="/health">Health</a></p></main>')
+  })
+
+  app.get('/health', (req, res) => {
+    res.status(200).json({ http: 'online', service: 'mp5_123', minecraft: controller ? 'started' : 'not_started' })
+  })
+
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log('[mp5_123] HTTP health server listening on port ' + PORT)
+  })
+
+  if (!MC_HOST) {
+    console.error('[mp5_123] Missing MC_HOST environment variable. Set it in Render.')
+  } else {
+    controller = module.exports({ mineflayer, host: MC_HOST, port: MC_PORT, version: MC_VERSION, owner: OWNER })
+  }
+
+  function shutdown(signal) {
+    console.log('[mp5_123] Received ' + signal + '. Shutting down...')
+    if (controller) controller.stop()
+    server.close(() => process.exit(0))
+    setTimeout(() => process.exit(0), 10000).unref()
+  }
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'))
+  process.on('SIGINT', () => shutdown('SIGINT'))
 }
