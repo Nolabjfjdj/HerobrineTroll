@@ -24,6 +24,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   let eatingFood = false
   let lastNoFoodWarningAt = 0
   const authorizedPlayers = new Set([owner, 'Itzhugoo12'])
+  const protectedPlayers = new Set(Array.from(authorizedPlayers, player => player.toLowerCase()))
   const swingTimes = new Map()
 
   function log(message) {
@@ -431,6 +432,33 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
 
   function handleChat(usernameFromChat, message) {
     if (usernameFromChat === username || !connected || !bot) return
+    const normalizedOwnerCommand = message.trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')
+    if (usernameFromChat.toLowerCase() === String(owner).toLowerCase()) {
+      const protectMatch = normalizedOwnerCommand.match(/^protege\\s+([A-Za-z0-9_]{1,16})$/i)
+      const unprotectMatch = normalizedOwnerCommand.match(/^arrete de proteger\\s+([A-Za-z0-9_]{1,16})$/i)
+      if (protectMatch) {
+        const targetName = protectMatch[1]
+        const key = targetName.toLowerCase()
+        if (protectedPlayers.has(key)) bot.chat(targetName + ' est déjà dans ma liste de protection.')
+        else {
+          protectedPlayers.add(key)
+          bot.chat('D’accord, je protégerai ' + targetName + '.')
+          log('Protection enabled for ' + targetName + '.')
+        }
+        return
+      }
+      if (unprotectMatch) {
+        const targetName = unprotectMatch[1]
+        const key = targetName.toLowerCase()
+        if (!protectedPlayers.has(key)) bot.chat(targetName + ' n’est pas dans ma liste de protection.')
+        else {
+          protectedPlayers.delete(key)
+          bot.chat('D’accord, je ne protégerai plus ' + targetName + '.')
+          log('Protection disabled for ' + targetName + '.')
+        }
+        return
+      }
+    }
     if (authorizedPlayers.has(usernameFromChat)) {
       const request = parseGiveRequest(message)
       if (request) {
@@ -540,7 +568,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     bot.on('entityHurt', (hurtEntity, source) => {
       const hurtPlayer = hurtEntity?.username
       const sourcePlayer = source?.username
-      if (authorizedPlayers.has(hurtPlayer)) {
+      if (protectedPlayers.has(String(hurtPlayer || '').toLowerCase())) {
         log(hurtPlayer + ' was hurt. Damage source: ' + (sourcePlayer || source?.name || 'not identified') + '.')
         const attacker = source?.position ? source : findNearbyAttacker(bot.players[hurtPlayer]?.entity)
         if (attacker) handleAttacker(attacker, 'defending ' + hurtPlayer)
