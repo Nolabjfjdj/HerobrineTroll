@@ -181,6 +181,24 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
 
   function handleChat(usernameFromChat, message) {
     if (usernameFromChat === username || !connected || !bot) return
+    if (usernameFromChat === owner) {
+      const request = parseGiveRequest(message)
+      if (request) {
+        if (giveRequest || givingItems) {
+          bot.chat('Attends, je termine déjà de donner des objets.')
+          return
+        }
+        const ownerEntity = bot.players[owner]?.entity
+        if (!ownerEntity) {
+          bot.chat('Je ne te vois pas. Reviens près de moi.')
+          return
+        }
+        giveRequest = request
+        bot.chat('J’arrive pour te donner ça.')
+        bot.pathfinder.setGoal(new goals.GoalFollow(ownerEntity, 2), true)
+        return
+      }
+    }
     const normalized = message.trim().toLowerCase().replace(/[\s-]+/g, '')
     if (normalized === 'weshananas') {
       bot.chat('Ouais c’est moi')
@@ -224,6 +242,18 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       else log('Could not identify the attacker near ' + owner + '.')
     })
     bot.on('physicsTick', () => {
+      if (giveRequest && !givingItems && connected && bot) {
+        const ownerEntity = bot.players[owner]?.entity
+        if (!ownerEntity) {
+          giveRequest = null
+          bot.pathfinder.setGoal(null)
+          bot.chat('Je ne te trouve plus, réessaie.')
+        } else if (bot.entity?.position?.distanceTo(ownerEntity.position) <= 3.2) {
+          bot.pathfinder.setGoal(null)
+          giveRequestedItems()
+        }
+        return
+      }
       if (!connected || !bot || !playerTarget || !playerHitPending) return
       const target = playerTarget
       if (!bot.entities[target.id] || !target.position || !bot.entity?.position) {
@@ -244,8 +274,12 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       swingTimes.clear()
       recentAttacker = null
       recentAttackerAt = 0
-      bot.pathfinder.setMovements(new Movements(bot))
-      log('Connected. Chat replies and damage detection are active.')
+      const movements = new Movements(bot)
+      movements.canDig = false
+      movements.allow1by1towers = false
+      movements.scafoldingBlocks = []
+      bot.pathfinder.setMovements(movements)
+      log('Connected. Chat replies, damage detection and item giving are active. Block breaking is disabled.')
     })
     bot.on('kicked', reason => {
       connected = false
@@ -257,6 +291,8 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       connected = false
       stopCombat()
       swingTimes.clear()
+      giveRequest = null
+      givingItems = false
       log('Disconnected: ' + (reason || 'connection ended'))
       bot = null
       scheduleReconnect()
