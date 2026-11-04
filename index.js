@@ -1,8 +1,7 @@
 const mineflayer = require('mineflayer')
 const express = require('express')
 const { Vec3 } = require('vec3')
-const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
-const { plugin: pvp } = require('mineflayer-pvp')
+const startMp5 = require('./mp5')
 
 const app = express()
 const PORT = Number(process.env.PORT || 10000)
@@ -17,21 +16,10 @@ const LOOK_DOT_THRESHOLD = Math.min(0.99, Math.max(0.7, Number(process.env.LOOK_
 const TROLL_ENABLED = process.env.TROLL_ENABLED !== 'false'
 const CHAT_TRIGGER_USER = 'NolanLaBanane415'
 const DIRT_TARGET = CHAT_TRIGGER_USER
-const MP5_USERNAME = 'mp5_123'
-const MP5_OWNER = CHAT_TRIGGER_USER
 
 let bot = null
 let connected = false
-let mp5 = null
-let mp5Connected = false
-let mp5ReconnectTimer = null
-let mp5ReconnectDelay = 5000
-let mp5Stopping = false
-let mp5SwingTimes = new Map()
-let mp5RecentAttacker = null
-let mp5RecentAttackerAt = 0
-let mp5PlayerTarget = null
-let mp5PlayerHitPending = false
+let mp5Controller = null
 let lastError = null
 let reconnectTimer = null
 let reconnectDelay = 5000
@@ -467,172 +455,6 @@ function handleChatCommand(username, message) {
   }, 900)
 }
 
-function mp5Log(message) {
-  console.log('[mp5_123] ' + message)
-}
-
-function mp5ScheduleReconnect() {
-  if (mp5Stopping || mp5ReconnectTimer || !MC_HOST) return
-  const delay = mp5ReconnectDelay
-  mp5Log('Next Minecraft connection attempt in ' + Math.round(delay / 1000) + ' seconds.')
-  mp5ReconnectTimer = setTimeout(() => {
-    mp5ReconnectTimer = null
-    connectMp5()
-  }, delay)
-  mp5ReconnectDelay = Math.min(mp5ReconnectDelay * 2, 60000)
-}
-
-function mp5StopCombat() {
-  if (!mp5) return
-  try {
-    mp5.pvp.stop()
-  } catch {}
-  try {
-    mp5.pathfinder.setGoal(null)
-  } catch {}
-  mp5PlayerTarget = null
-  mp5PlayerHitPending = false
-}
-
-function mp5PunchPlayer(entity) {
-  if (!mp5Connected || !mp5 || !entity || entity.type !== 'player') return
-  mp5StopCombat()
-  mp5PlayerTarget = entity
-  mp5PlayerHitPending = true
-  mp5.unequip('hand').then(() => {
-    if (!mp5Connected || !mp5 || mp5PlayerTarget !== entity) return
-    mp5.pathfinder.setGoal(new goals.GoalFollow(entity, 2), true)
-    mp5Log('Following ' + (entity.username || entity.name) + ' to deliver one bare-hand hit.')
-  }).catch(error => mp5Log('Could not empty hand: ' + error.message))
-}
-
-function mp5AttackMob(entity, reason) {
-  if (!mp5Connected || !mp5 || !entity || entity.type !== 'mob' || entity.name === 'wolf') return
-  mp5StopCombat()
-  mp5Log('Attacking mob ' + entity.name + ' (' + reason + ').')
-  mp5.pvp.attack(entity)
-}
-
-function mp5HandleAttacker(entity, reason) {
-  if (!entity || !entity.position || entity.name === 'wolf') return
-  mp5RecentAttacker = entity
-  mp5RecentAttackerAt = Date.now()
-  if (entity.type === 'player') {
-    mp5PunchPlayer(entity)
-    return
-  }
-  if (entity.type === 'mob') mp5AttackMob(entity, reason)
-}
-
-function mp5FindAttacker(ownerEntity) {
-  if (!mp5 || !ownerEntity) return null
-  const now = Date.now()
-  const nearby = Object.values(mp5.entities).filter(entity =>
-    entity.id !== ownerEntity.id &&
-    entity.position &&
-    entity.position.distanceTo(ownerEntity.position) <= 5 &&
-    now - (mp5SwingTimes.get(entity.id) || 0) <= 1800
-  )
-  nearby.sort((a, b) => a.position.distanceTo(ownerEntity.position) - b.position.distanceTo(ownerEntity.position))
-  const swingingPlayer = nearby.find(entity => entity.type === 'player')
-  if (swingingPlayer) return swingingPlayer
-  const swingingMob = nearby.find(entity => entity.type === 'mob' && entity.name !== 'wolf')
-  if (swingingMob) return swingingMob
-  const hostileNames = /zombie|skeleton|creeper|spider|enderman|witch|slime|phantom|drowned|husk|stray|pillager|vindicator|ravager|evoker|blaze|ghast|hoglin|piglin|warden|silverfish|guardian|shulker|vex|breeze|bogged|cave_spider/i
-  return Object.values(mp5.entities)
-    .filter(entity => entity.type === 'mob' && entity.name !== 'wolf' && hostileNames.test(entity.name || '') && entity.position && entity.position.distanceTo(ownerEntity.position) <= 4)
-    .sort((a, b) => a.position.distanceTo(ownerEntity.position) - b.position.distanceTo(ownerEntity.position))[0] || null
-}
-
-function mp5HandleChat(username, message) {
-  if (username === MP5_USERNAME || !mp5Connected || !mp5) return
-  const normalized = message.trim().toLowerCase().replace(/[\s-]+/g, '')
-  if (normalized === 'weshananas') {
-    mp5.chat('Ouais c’est moi')
-    return
-  }
-  if (normalized === 'aidenous') {
-    mp5.chat('Non')
-    return
-  }
-  if (normalized === 'tuele') {
-    if (!mp5RecentAttacker || Date.now() - mp5RecentAttackerAt > 15000 || !mp5.entities[mp5RecentAttacker.id]) {
-      mp5.chat('Je ne vois personne à attaquer.')
-      return
-    }
-    mp5HandleAttacker(mp5RecentAttacker, 'chat command')
-  }
-}
-
-function connectMp5() {
-  if (mp5Stopping || !MC_HOST) return
-  mp5Log('Connecting to ' + MC_HOST + ':' + MC_PORT + ' as ' + MP5_USERNAME + '...')
-  try {
-    mp5 = mineflayer.createBot({
-      host: MC_HOST,
-      port: MC_PORT,
-      username: MP5_USERNAME,
-      auth: 'offline',
-      version: MC_VERSION
-    })
-  } catch (error) {
-    mp5Log('Could not create bot: ' + error.message)
-    mp5ScheduleReconnect()
-    return
-  }
-
-  mp5.loadPlugin(pathfinder)
-  mp5.loadPlugin(pvp)
-  mp5.on('chat', mp5HandleChat)
-  mp5.on('entitySwingArm', entity => {
-    if (entity?.id !== undefined) mp5SwingTimes.set(entity.id, Date.now())
-  })
-  mp5.on('entityHurt', entity => {
-    if (entity?.username !== MP5_OWNER) return
-    const ownerEntity = mp5.players[MP5_OWNER]?.entity
-    const attacker = mp5FindAttacker(ownerEntity)
-    if (attacker) mp5HandleAttacker(attacker, 'defending ' + MP5_OWNER)
-  })
-  mp5.on('physicsTick', () => {
-    if (!mp5Connected || !mp5 || !mp5PlayerTarget || !mp5PlayerHitPending) return
-    const target = mp5PlayerTarget
-    if (!mp5.entities[target.id] || !target.position || !mp5.entity?.position) {
-      mp5StopCombat()
-      return
-    }
-    if (mp5.entity.position.distanceTo(target.position) <= 3.2) {
-      mp5PlayerHitPending = false
-      mp5.pathfinder.setGoal(null)
-      mp5.attack(target)
-      mp5Log('Delivered one bare-hand hit to ' + (target.username || target.name) + '.')
-      mp5PlayerTarget = null
-    }
-  })
-  mp5.once('spawn', () => {
-    mp5Connected = true
-    mp5ReconnectDelay = 5000
-    mp5SwingTimes.clear()
-    mp5RecentAttacker = null
-    mp5RecentAttackerAt = 0
-    mp5.pathfinder.setMovements(new Movements(mp5))
-    mp5Log('Connected to the world. Chat replies and defense are active.')
-  })
-  mp5.on('kicked', reason => {
-    mp5Connected = false
-    mp5Log('Kicked: ' + (typeof reason === 'string' ? reason : JSON.stringify(reason)))
-    mp5StopCombat()
-  })
-  mp5.on('error', error => mp5Log('Connection error: ' + error.message))
-  mp5.once('end', reason => {
-    mp5Connected = false
-    mp5StopCombat()
-    mp5SwingTimes.clear()
-    mp5Log('Disconnected: ' + (reason || 'connection ended'))
-    mp5 = null
-    mp5ScheduleReconnect()
-  })
-}
-
 function connectMinecraft() {
   if (stopping || !MC_HOST) return
   log('Connecting to ' + MC_HOST + ':' + MC_PORT + ' with Minecraft ' + MC_VERSION + '...')
@@ -712,7 +534,7 @@ if (!MC_HOST) {
   log('Missing MC_HOST environment variable. HTTP status server is running.')
 } else {
   connectMinecraft()
-  connectMp5()
+  mp5Controller = startMp5({ mineflayer, host: MC_HOST, port: MC_PORT, version: MC_VERSION, owner: CHAT_TRIGGER_USER })
 }
 
 function shutdown(signal) {
@@ -720,8 +542,7 @@ function shutdown(signal) {
   stopping = true
   log('Received ' + signal + '. Shutting down...')
   if (reconnectTimer) clearTimeout(reconnectTimer)
-  if (mp5ReconnectTimer) clearTimeout(mp5ReconnectTimer)
-  mp5Stopping = true
+  if (mp5Controller) mp5Controller.stop()
   resetTrollState()
   if (mp5) {
     try {
