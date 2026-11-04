@@ -162,8 +162,19 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     }
     if (!nearestDoor) return
     doorActionAt = now
+    const doorPosition = nearestDoor.position.clone()
+    const currentGoal = bot.pathfinder.goal
     bot.activateBlock(nearestDoor).then(() => {
       log('Interacted with nearby door: ' + nearestDoor.name + '.')
+      setTimeout(() => {
+        if (!connected || !bot) return
+        const updatedDoor = bot.blockAt(doorPosition)
+        const doorProperties = updatedDoor?.getProperties?.() || updatedDoor?._properties || {}
+        if (doorProperties.open === true && currentGoal && bot.pathfinder.goal === currentGoal) {
+          bot.pathfinder.setGoal(currentGoal, true)
+          log('Door is open. Recalculating the current path.')
+        }
+      }, 350)
     }).catch(error => {
       log('Could not open nearby door: ' + error.message)
     })
