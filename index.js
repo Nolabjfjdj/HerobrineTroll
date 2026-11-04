@@ -15,7 +15,6 @@ const LOOK_DOT_THRESHOLD = Math.min(0.99, Math.max(0.7, Number(process.env.LOOK_
 const TROLL_ENABLED = process.env.TROLL_ENABLED !== 'false'
 const CHAT_TRIGGER_USER = 'NolanLaBanane415'
 const DIRT_TARGET = 'Itzhugoo12'
-const DIRT_DROP_COOLDOWN = 30000
 
 let bot = null
 let connected = false
@@ -35,7 +34,6 @@ let previousPosition = null
 let apparitionPosition = null
 let targetStartPosition = null
 let returning = false
-let lastDirtDropAt = 0
 
 function log(message) {
   console.log('[Herobrine] ' + message)
@@ -410,18 +408,11 @@ function handleChatCommand(username, message) {
   if (username !== CHAT_TRIGGER_USER || message.trim().toLowerCase() !== 'wesh herobrine') return
   if (!connected || !bot) return
 
-  const now = Date.now()
-  if (now - lastDirtDropAt < DIRT_DROP_COOLDOWN) {
-    bot.chat('Herobrine a besoin de reprendre son souffle.')
-    return
-  }
-
   if (!bot.players[DIRT_TARGET]) {
     bot.chat(DIRT_TARGET + ' doit être connecté pour recevoir le cadeau.')
     return
   }
 
-  lastDirtDropAt = now
   clearTrollTimers()
   resetTrollState()
   currentAction = 'manual_dirt_drop'
@@ -455,7 +446,7 @@ function handleChatCommand(username, message) {
 
       bot.chat('/execute at ' + DIRT_TARGET + ' run summon item ~ ~2 ~ {Item:{id:"minecraft:dirt",count:64}}')
       index += 1
-      setTimeout(dropNextStack, 300)
+      setTimeout(dropNextStack, 25)
     }
 
     dropNextStack()
