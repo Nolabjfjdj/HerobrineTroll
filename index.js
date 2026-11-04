@@ -538,7 +538,7 @@ function mp5FindAttacker(ownerEntity) {
   if (swingingPlayer) return swingingPlayer
   const swingingMob = nearby.find(entity => entity.type === 'mob' && entity.name !== 'wolf')
   if (swingingMob) return swingingMob
-  const hostileNames = /zombie|skeleton|creeper|spider|enderman|witch|slime|phantom|drowned|husk|stray|pillager|vindicator|ravager| evoker|blaze|ghast|hoglin|piglin|warden|silverfish|guardian|shulker|vex|breeze|bogged|cave_spider/i
+  const hostileNames = /zombie|skeleton|creeper|spider|enderman|witch|slime|phantom|drowned|husk|stray|pillager|vindicator|ravager|evoker|blaze|ghast|hoglin|piglin|warden|silverfish|guardian|shulker|vex|breeze|bogged|cave_spider/i
   return Object.values(mp5.entities)
     .filter(entity => entity.type === 'mob' && entity.name !== 'wolf' && hostileNames.test(entity.name || '') && entity.position && entity.position.distanceTo(ownerEntity.position) <= 4)
     .sort((a, b) => a.position.distanceTo(ownerEntity.position) - b.position.distanceTo(ownerEntity.position))[0] || null
@@ -546,12 +546,12 @@ function mp5FindAttacker(ownerEntity) {
 
 function mp5HandleChat(username, message) {
   if (username === MP5_USERNAME || !mp5Connected || !mp5) return
-  const normalized = message.trim().toLowerCase().replace(/[\\s-]+/g, '')
+  const normalized = message.trim().toLowerCase().replace(/[\s-]+/g, '')
   if (normalized === 'weshananas') {
     mp5.chat('Ouais c’est moi')
     return
   }
-  if (normalized === 'aide-nous'.replace(/[\\s-]+/g, '')) {
+  if (normalized === 'aidenous') {
     mp5.chat('Non')
     return
   }
