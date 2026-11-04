@@ -673,7 +673,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         return
       }
       if (['arrete', 'stop', 'annule'].includes(taskCommand)) {
-        if (stopActiveTask()) bot.chat('D’accord, j’arrête ma récolte.')
+        if (stopActiveTask()) bot.chat('D’accord, j’arrête la tâche en cours.')
         else bot.chat('Je ne suis pas en train de récolter.')
         return
       }
