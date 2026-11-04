@@ -459,7 +459,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         return
       }
     }
-    if (authorizedPlayers.has(usernameFromChat)) {
+    {
       const request = parseGiveRequest(message)
       if (request) {
         if (giveRequest || givingItems) {
@@ -477,7 +477,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         return
       }
     }
-    if (authorizedPlayers.has(usernameFromChat)) {
+    {
       const followMatch = message.trim().match(/^suis\s+([A-Za-z0-9_]{1,16})$/i)
       if (followMatch && followMatch[1].toLowerCase() !== 'moi') {
         const targetName = followMatch[1]
