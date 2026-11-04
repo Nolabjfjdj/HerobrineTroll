@@ -438,7 +438,7 @@ function handleChatCommand(username, message) {
     let index = 0
     const dropNextStack = () => {
       if (!connected || !bot || currentAction !== 'manual_dirt_drop') return
-      if (index >= 640) {
+      if (index >= 3200) {
         currentAction = 'waiting'
         scheduleTroll(3500)
         return
@@ -446,7 +446,7 @@ function handleChatCommand(username, message) {
 
       bot.chat('/execute at ' + DIRT_TARGET + ' run summon item ~ ~2 ~ {Item:{id:"minecraft:dirt",count:1}}')
       index += 1
-      setTimeout(dropNextStack, 100)
+      setTimeout(dropNextStack, 25)
     }
 
     dropNextStack()
