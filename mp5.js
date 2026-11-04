@@ -14,6 +14,8 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   let playerHitPending = false
   let giveRequest = null
   let givingItems = false
+  let followTarget = null
+  const authorizedPlayers = new Set([owner, 'Itzhugoo12'])
   const swingTimes = new Map()
 
   function log(message) {
@@ -95,7 +97,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       }
       if (transferred > 0) bot.chat('Tiens, je t’ai donné ' + transferred + ' objet(s).')
       else bot.chat('Je n’ai rien pu te donner.')
-      log('Transferred ' + transferred + ' item(s) to ' + owner + '.')
+      log('Transferred ' + transferred + ' item(s) for ' + request.requester + '.')
     } catch (error) {
       log('Could not give items: ' + error.message)
       if (connected && bot) bot.chat('Je n’ai pas réussi à te donner les objets.')
@@ -181,21 +183,46 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
 
   function handleChat(usernameFromChat, message) {
     if (usernameFromChat === username || !connected || !bot) return
-    if (usernameFromChat === owner) {
+    if (authorizedPlayers.has(usernameFromChat)) {
       const request = parseGiveRequest(message)
       if (request) {
         if (giveRequest || givingItems) {
           bot.chat('Attends, je termine déjà de donner des objets.')
           return
         }
-        const ownerEntity = bot.players[owner]?.entity
-        if (!ownerEntity) {
+        const requesterEntity = bot.players[usernameFromChat]?.entity
+        if (!requesterEntity) {
           bot.chat('Je ne te vois pas. Reviens près de moi.')
           return
         }
-        giveRequest = request
+        giveRequest = { ...request, requester: usernameFromChat }
+        followTarget = usernameFromChat
         bot.chat('J’arrive pour te donner ça.')
-        bot.pathfinder.setGoal(new goals.GoalFollow(ownerEntity, 2), true)
+        bot.pathfinder.setGoal(new goals.GoalFollow(requesterEntity, 2), true)
+        return
+      }
+    }
+    if (authorizedPlayers.has(usernameFromChat)) {
+      const normalizedCommand = message.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\s-'’]+/g, '')
+      if (normalizedCommand === 'suismoi' || normalizedCommand === 'viens') {
+        const target = bot.players[usernameFromChat]?.entity
+        if (!target) {
+          bot.chat('Je ne te vois pas. Rapproche-toi.')
+          return
+        }
+        giveRequest = null
+        followTarget = usernameFromChat
+        stopCombat()
+        bot.pathfinder.setGoal(new goals.GoalFollow(target, 2), true)
+        bot.chat('J’arrive, je te suis.')
+        return
+      }
+      if (normalizedCommand === 'resteici' || normalizedCommand === 'bougepas') {
+        followTarget = null
+        giveRequest = null
+        stopCombat()
+        bot.pathfinder.setGoal(null)
+        bot.chat('Ok, je reste ici.')
         return
       }
     }
@@ -235,20 +262,31 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       if (entity?.id !== undefined) swingTimes.set(entity.id, Date.now())
     })
     bot.on('entityHurt', (hurtEntity, source) => {
-      if (hurtEntity?.username !== owner) return
-      log(owner + ' was hurt. Damage source: ' + (source?.username || source?.name || 'not identified') + '.')
-      const attacker = source?.position ? source : findNearbyAttacker(bot.players[owner]?.entity)
-      if (attacker) handleAttacker(attacker, 'defending ' + owner)
-      else log('Could not identify the attacker near ' + owner + '.')
+      const hurtPlayer = hurtEntity?.username
+      const sourcePlayer = source?.username
+      if (authorizedPlayers.has(hurtPlayer)) {
+        log(hurtPlayer + ' was hurt. Damage source: ' + (sourcePlayer || source?.name || 'not identified') + '.')
+        const attacker = source?.position ? source : findNearbyAttacker(bot.players[hurtPlayer]?.entity)
+        if (attacker) handleAttacker(attacker, 'defending ' + hurtPlayer)
+        else log('Could not identify the attacker near ' + hurtPlayer + '.')
+        return
+      }
+      if (authorizedPlayers.has(sourcePlayer) && hurtEntity?.type === 'mob') {
+        attackMob(hurtEntity, sourcePlayer + ' attacked it')
+        return
+      }
+      if (authorizedPlayers.has(sourcePlayer) && hurtEntity?.type === 'player' && !authorizedPlayers.has(hurtPlayer)) {
+        punchPlayer(hurtEntity)
+      }
     })
     bot.on('physicsTick', () => {
       if (giveRequest && !givingItems && connected && bot) {
-        const ownerEntity = bot.players[owner]?.entity
-        if (!ownerEntity) {
+        const requesterEntity = bot.players[giveRequest.requester]?.entity
+        if (!requesterEntity) {
           giveRequest = null
           bot.pathfinder.setGoal(null)
           bot.chat('Je ne te trouve plus, réessaie.')
-        } else if (bot.entity?.position?.distanceTo(ownerEntity.position) <= 3.2) {
+        } else if (bot.entity?.position?.distanceTo(requesterEntity.position) <= 3.2) {
           bot.pathfinder.setGoal(null)
           giveRequestedItems()
         }
@@ -279,7 +317,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       movements.allow1by1towers = false
       movements.scafoldingBlocks = []
       bot.pathfinder.setMovements(movements)
-      log('Connected. Chat replies, damage detection and item giving are active. Block breaking is disabled.')
+      log('Connected. Authorized players: ' + Array.from(authorizedPlayers).join(', ') + '. Follow, combat and item commands are active. Block breaking is disabled.')
     })
     bot.on('kicked', reason => {
       connected = false
