@@ -428,7 +428,7 @@ function handleChatCommand(username, message) {
 
   const distance = 2 + Math.floor(Math.random() * 2)
   const teleportCommand = '/execute at ' + DIRT_TARGET + ' rotated as ' + DIRT_TARGET + ' run tp ' + bot.username + ' ^ ^ ^' + distance
-  log('Chat trigger received from ' + username + '. Teleporting ' + distance + ' blocks in front of ' + DIRT_TARGET + ', facing them, then dropping 15 stacks of dirt.')
+  log('Chat trigger received from ' + username + '. Teleporting ' + distance + ' blocks in front of ' + DIRT_TARGET + ', facing them, then dropping 25 stacks of dirt.')
   bot.chat(teleportCommand)
 
   setTimeout(() => {
@@ -447,8 +447,7 @@ function handleChatCommand(username, message) {
     let index = 0
     const dropNextStack = () => {
       if (!connected || !bot || currentAction !== 'manual_dirt_drop') return
-      if (index >= 15) {
-        bot.chat('Cadeau livré à ' + DIRT_TARGET + ' !')
+      if (index >= 25) {
         currentAction = 'waiting'
         scheduleTroll(3500)
         return
