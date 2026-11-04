@@ -14,7 +14,7 @@ const APPEAR_SECONDS = Math.max(1, Number(process.env.APPEAR_SECONDS || 5))
 const LOOK_DOT_THRESHOLD = Math.min(0.99, Math.max(0.7, Number(process.env.LOOK_DOT_THRESHOLD || 0.93)))
 const TROLL_ENABLED = process.env.TROLL_ENABLED !== 'false'
 const CHAT_TRIGGER_USER = 'NolanLaBanane415'
-const DIRT_TARGET = 'Itzhugoo12'
+const DIRT_TARGET = CHAT_TRIGGER_USER
 
 let bot = null
 let connected = false
@@ -419,7 +419,7 @@ function handleChatCommand(username, message) {
 
   const distance = 2 + Math.floor(Math.random() * 2)
   const teleportCommand = '/execute at ' + DIRT_TARGET + ' rotated as ' + DIRT_TARGET + ' run tp ' + bot.username + ' ^ ^ ^' + distance
-  log('Chat trigger received from ' + username + '. Teleporting ' + distance + ' blocks in front of ' + DIRT_TARGET + ', facing them, then dropping 25 stacks of dirt.')
+  log('Chat trigger received from ' + username + '. Teleporting ' + distance + ' blocks in front of ' + DIRT_TARGET + ', facing them, then dropping 50 stacks of dirt.')
   bot.chat(teleportCommand)
 
   setTimeout(() => {
@@ -438,7 +438,7 @@ function handleChatCommand(username, message) {
     let index = 0
     const dropNextStack = () => {
       if (!connected || !bot || currentAction !== 'manual_dirt_drop') return
-      if (index >= 25) {
+      if (index >= 50) {
         currentAction = 'waiting'
         scheduleTroll(3500)
         return
