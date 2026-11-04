@@ -82,7 +82,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     const request = giveRequest
     giveRequest = null
     try {
-      if (bot.entity?.equipment?.[5]) {
+      if (bot.entity?.equipment?.[1]) {
         try {
           await bot.unequip('off-hand')
           log('Moved off-hand item into inventory before giving items.')
