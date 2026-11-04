@@ -56,8 +56,10 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   function attackMob(entity, reason) {
     if (!connected || !bot || !entity || entity.type !== 'mob' || entity.name === 'wolf') return
     stopCombat()
-    log('Attacking ' + entity.name + ' (' + reason + ').')
-    bot.pvp.attack(entity)
+    log('Attacking ' + entity.name + ' with an empty hand (' + reason + ').')
+    bot.unequip('hand').then(() => {
+      if (connected && bot) bot.pvp.attack(entity)
+    }).catch(error => log('Could not empty hand before defending: ' + error.message))
   }
 
   function handleAttacker(entity, reason) {
