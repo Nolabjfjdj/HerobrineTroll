@@ -82,6 +82,14 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     const request = giveRequest
     giveRequest = null
     try {
+      if (bot.entity?.equipment?.[5]) {
+        try {
+          await bot.unequip('off-hand')
+          log('Moved off-hand item into inventory before giving items.')
+        } catch (error) {
+          log('Could not move off-hand item into inventory: ' + error.message)
+        }
+      }
       const items = bot.inventory.items().filter(item => itemMatchesQuery(item, request.query))
       if (!items.length) {
         bot.chat(request.query ? 'Je ne trouve pas cet objet dans mon inventaire.' : 'Mon inventaire est vide.')
@@ -103,6 +111,16 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       if (connected && bot) bot.chat('Je n’ai pas réussi à te donner les objets.')
     } finally {
       givingItems = false
+      if (connected && bot && followTarget) {
+        const target = bot.players[followTarget]?.entity
+        if (target) {
+          bot.pathfinder.setGoal(new goals.GoalFollow(target, 2), true)
+          log('Resuming follow mode for ' + followTarget + ' after item delivery.')
+        } else {
+          followTarget = null
+          bot.pathfinder.setGoal(null)
+        }
+      }
     }
   }
 
@@ -196,7 +214,6 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
           return
         }
         giveRequest = { ...request, requester: usernameFromChat }
-        followTarget = usernameFromChat
         bot.chat('J’arrive pour te donner ça.')
         bot.pathfinder.setGoal(new goals.GoalFollow(requesterEntity, 2), true)
         return
@@ -314,6 +331,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       recentAttackerAt = 0
       const movements = new Movements(bot)
       movements.canDig = false
+      movements.canOpenDoors = true
       movements.allow1by1towers = false
       movements.scafoldingBlocks = []
       bot.pathfinder.setMovements(movements)
