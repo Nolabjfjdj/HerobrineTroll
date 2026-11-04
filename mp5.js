@@ -302,18 +302,20 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     const nearby = Object.values(bot.entities).filter(entity =>
       entity.id !== ownerEntity.id &&
       entity.position &&
-      entity.position.distanceTo(ownerEntity.position) <= 5 &&
-      now - (swingTimes.get(entity.id) || 0) <= 2200
+      entity.position.distanceTo(ownerEntity.position) <= 6
     )
     nearby.sort((a, b) => a.position.distanceTo(ownerEntity.position) - b.position.distanceTo(ownerEntity.position))
-    const player = nearby.find(entity => entity.type === 'player')
-    if (player) return player
-    const mob = nearby.find(entity => entity.type === 'mob' && entity.name !== 'wolf')
-    if (mob) return mob
-    const hostileNames = /zombie|skeleton|creeper|spider|enderman|witch|slime|phantom|drowned|husk|stray|pillager|vindicator|ravager|evoker|blaze|ghast|hoglin|piglin|warden|silverfish|guardian|shulker|vex|breeze|bogged|cave_spider/i
-    return Object.values(bot.entities)
-      .filter(entity => entity.type === 'mob' && entity.name !== 'wolf' && hostileNames.test(entity.name || '') && entity.position && entity.position.distanceTo(ownerEntity.position) <= 4)
-      .sort((a, b) => a.position.distanceTo(ownerEntity.position) - b.position.distanceTo(ownerEntity.position))[0] || null
+    const recentPlayer = nearby.find(entity =>
+      entity.type === 'player' &&
+      now - (swingTimes.get(entity.id) || 0) <= 2200
+    )
+    if (recentPlayer) return recentPlayer
+    const hostileNames = /zombie|skeleton|creeper|spider|enderman|witch|slime|phantom|drowned|husk|stray|pillager|vindicator|ravager|evoker|blaze|ghast|hoglin|piglin|warden|silverfish|guardian|shulker|vex|breeze|bogged|cave_spider|magma_cube|zoglin| zoglin|wither_skeleton|zombified_piglin/i
+    return nearby.find(entity =>
+      entity.type === 'mob' &&
+      entity.name !== 'wolf' &&
+      hostileNames.test(entity.name || '')
+    ) || null
   }
 
   function isLogBlock(block) {
@@ -736,20 +738,23 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       if (entity?.id !== undefined) swingTimes.set(entity.id, Date.now())
     })
     bot.on('entityHurt', (hurtEntity, source) => {
-      const hurtPlayer = hurtEntity?.username
+      if (!hurtEntity || hurtEntity.id === bot.entity?.id) return
+      const hurtPlayer = hurtEntity.username
       const sourcePlayer = source?.username
       if (protectedPlayers.has(String(hurtPlayer || '').toLowerCase())) {
         log(hurtPlayer + ' was hurt. Damage source: ' + (sourcePlayer || source?.name || 'not identified') + '.')
-        const attacker = source?.position ? source : findNearbyAttacker(bot.players[hurtPlayer]?.entity)
+        const attacker = source?.position && source.id !== bot.entity?.id
+          ? source
+          : findNearbyAttacker(bot.players[hurtPlayer]?.entity)
         if (attacker) handleAttacker(attacker, 'defending ' + hurtPlayer)
         else log('Could not identify the attacker near ' + hurtPlayer + '.')
         return
       }
-      if (authorizedPlayers.has(sourcePlayer) && hurtEntity?.type === 'mob') {
+      if (sourcePlayer && authorizedPlayers.has(sourcePlayer) && hurtEntity.type === 'mob') {
         attackMob(hurtEntity, sourcePlayer + ' attacked it')
         return
       }
-      if (authorizedPlayers.has(sourcePlayer) && hurtEntity?.type === 'player' && !authorizedPlayers.has(hurtPlayer)) {
+      if (sourcePlayer && authorizedPlayers.has(sourcePlayer) && hurtEntity.type === 'player' && !authorizedPlayers.has(hurtPlayer)) {
         punchPlayer(hurtEntity)
       }
     })
