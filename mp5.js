@@ -15,7 +15,6 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   let giveRequest = null
   let givingItems = false
   let followTarget = null
-  let doorActionAt = 0
   let lookTargetId = null
   let lookUntil = 0
   let lastLookAt = 0
@@ -137,49 +136,6 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         }
       }
     }
-  }
-
-  function tryOpenNearbyDoor() {
-    if (!bot || !connected || !bot.entity || !bot.pathfinder?.goal) return
-    const now = Date.now()
-    if (now - doorActionAt < 1200) return
-    const origin = bot.entity.position.floored()
-    let nearestDoor = null
-    let nearestDistance = 3.2
-    for (let x = -1; x <= 1; x++) {
-      for (let z = -1; z <= 1; z++) {
-        for (let y = 0; y <= 1; y++) {
-          const block = bot.blockAt(origin.offset(x, y, z))
-          if (!block || !/_door$/.test(block.name) || /iron_door$/.test(block.name)) continue
-          const properties = block.getProperties?.() || block._properties || {}
-          if (properties.half && properties.half !== 'lower') continue
-          if (properties.open === true) continue
-          const distance = block.position.distanceTo(bot.entity.position)
-          if (distance <= nearestDistance) {
-            nearestDoor = block
-            nearestDistance = distance
-          }
-        }
-      }
-    }
-    if (!nearestDoor) return
-    doorActionAt = now
-    const doorPosition = nearestDoor.position.clone()
-    const currentGoal = bot.pathfinder.goal
-    bot.activateBlock(nearestDoor).then(() => {
-      log('Interacted with nearby door: ' + nearestDoor.name + '.')
-      setTimeout(() => {
-        if (!connected || !bot) return
-        const updatedDoor = bot.blockAt(doorPosition)
-        const doorProperties = updatedDoor?.getProperties?.() || updatedDoor?._properties || {}
-        if (doorProperties.open === true && currentGoal && bot.pathfinder.goal === currentGoal) {
-          bot.pathfinder.setGoal(currentGoal, true)
-          log('Door is open. Recalculating the current path.')
-        }
-      }, 350)
-    }).catch(error => {
-      log('Could not open nearby door: ' + error.message)
-    })
   }
 
   function updateIdleLook() {
@@ -389,6 +345,11 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
           log('Cannot reach harvest target ' + currentBlock.name + '.')
           break
         }
+        const bestTool = bot.pathfinder.bestHarvestTool(currentBlock)
+        if (bestTool) {
+          await bot.equip(bestTool, 'hand')
+          log('Equipped ' + bestTool.name + ' to harvest ' + currentBlock.name + '.')
+        }
         await bot.dig(currentBlock)
         harvested++
       }
@@ -519,7 +480,6 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       }
     })
     bot.on('physicsTick', () => {
-      tryOpenNearbyDoor()
       if (giveRequest && !givingItems && connected && bot) {
         const requesterEntity = bot.players[giveRequest.requester]?.entity
         if (!requesterEntity) {
@@ -558,6 +518,28 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       movements.canOpenDoors = true
       movements.allow1by1towers = false
       movements.scafoldingBlocks = []
+      const isWoodenDoorBlock = block => Boolean(block && /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|pale_oak|crimson|warped)_door$/.test(block.name))
+      for (const block of bot.registry.blocksArray) {
+        if (isWoodenDoorBlock(block)) movements.openable.add(block.id)
+      }
+      const originalGetBlock = movements.getBlock.bind(movements)
+      movements.getBlock = function (pos, dx, dy, dz) {
+        const block = originalGetBlock(pos, dx, dy, dz)
+        if (isWoodenDoorBlock(block)) {
+          const properties = block.getProperties?.() || block._properties || {}
+          const lowerBlock = properties.half === 'upper' ? bot.blockAt(block.position.offset(0, -1, 0)) : block
+          const lowerProperties = lowerBlock?.getProperties?.() || lowerBlock?._properties || {}
+          block.openable = lowerProperties.open !== true
+        }
+        return block
+      }
+      const originalSafeOrBreak = movements.safeOrBreak.bind(movements)
+      movements.safeOrBreak = function (block, toBreak) {
+        if (isWoodenDoorBlock(block)) {
+          return this.exclusionStep(block) + this.getNumEntitiesAt(block.position, 0, 0, 0) * this.entityCost
+        }
+        return originalSafeOrBreak(block, toBreak)
+      }
       bot.pathfinder.setMovements(movements)
       log('Connected. Authorized players: ' + Array.from(authorizedPlayers).join(', ') + '. Follow, combat and item commands are active. Block breaking is disabled.')
     })
