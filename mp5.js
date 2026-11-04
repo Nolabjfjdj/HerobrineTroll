@@ -33,7 +33,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   }
 
   function parseGiveRequest(message) {
-    const match = message.trim().match(/^donne\s+(?:tout\s+)?(.+)?$/i)
+    const match = message.trim().match(/^donne(?:\s+tout)?(?:\s+(.+))?$/i)
     if (!match) return null
     let query = normalizeItemText(match[1] || '')
     query = query
