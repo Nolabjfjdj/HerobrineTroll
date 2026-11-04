@@ -738,7 +738,29 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       if (entity?.id !== undefined) swingTimes.set(entity.id, Date.now())
     })
     bot.on('entityHurt', (hurtEntity, source) => {
-      if (!hurtEntity || hurtEntity.id === bot.entity?.id) return
+      if (!hurtEntity) return
+      if (hurtEntity.id === bot.entity?.id) {
+        const attacker = source?.position && source.id !== bot.entity?.id
+          ? source
+          : findNearbyAttacker(bot.entity)
+        if (!attacker) {
+          log('MP5 was hurt, but the attacker could not be identified nearby.')
+          return
+        }
+        if (attacker.type === 'player') {
+          const attackerName = String(attacker.username || attacker.name || '').toLowerCase()
+          if (protectedPlayers.has(attackerName)) {
+            log('MP5 was hit by protected player ' + (attacker.username || attacker.name) + '; no retaliation.')
+          } else {
+            punchPlayer(attacker)
+          }
+          return
+        }
+        if (attacker.type === 'mob') {
+          attackMob(attacker, 'defending MP5')
+        }
+        return
+      }
       const hurtPlayer = hurtEntity.username
       const sourcePlayer = source?.username
       if (protectedPlayers.has(String(hurtPlayer || '').toLowerCase())) {
