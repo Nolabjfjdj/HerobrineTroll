@@ -795,7 +795,8 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   async function digIfSafe(position, protectedAreas, kind) {
     if (!isOutsideProtectedAreas(position, protectedAreas, 32)) return false
     const block = bot.blockAt(position)
-    if (!block || block.name === 'air') return true
+    if (!block) return false
+    if (block.name === 'air') return true
     if (!isMineableTunnelBlock(block) && !(kind === 'wood' && isLogBlock(block))) return false
     if (!bot.canDigBlock(block)) return false
     const tool = bot.pathfinder.bestHarvestTool(block)
@@ -808,6 +809,15 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     const directions = [[1, 0], [-1, 0], [0, 1], [0, -1]]
     let direction = directions[Math.floor(Math.random() * directions.length)]
     let steps = 0
+    let blockedDirections = 0
+    const rotateAfterBlockedStep = async () => {
+      direction = directions[(directions.indexOf(direction) + 1) % directions.length]
+      blockedDirections++
+      if (blockedDirections >= directions.length) {
+        blockedDirections = 0
+        await waitForHarvest(1000)
+      }
+    }
     let toolReady = await ensureHarvestTool('mine')
     if (!toolReady) {
       bot.chat('Il me manque de quoi fabriquer une pioche. Ajoute du bois, des bâtons et de la pierre ou du métal dans mon inventaire.')
@@ -820,31 +830,32 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       const position = bot.entity.position.floored()
       const next = position.offset(direction[0], -1, direction[1])
       if (!isOutsideProtectedAreas(next, protectedAreas, 32)) {
-        direction = directions[(directions.indexOf(direction) + 1) % directions.length]
+        await rotateAfterBlockedStep()
         continue
       }
       const landingFloor = bot.blockAt(next.offset(0, -1, 0))
       if (!landingFloor || landingFloor.boundingBox !== 'block' || /water|lava/.test(landingFloor.name)) {
-        direction = directions[(directions.indexOf(direction) + 1) % directions.length]
+        await rotateAfterBlockedStep()
         continue
       }
       const feetBlock = bot.blockAt(next)
       const headBlock = bot.blockAt(next.offset(0, 1, 0))
       if ([feetBlock, headBlock].some(block => block && /water|lava/.test(block.name))) {
-        direction = directions[(directions.indexOf(direction) + 1) % directions.length]
+        await rotateAfterBlockedStep()
         continue
       }
       if (!await digIfSafe(next, protectedAreas, 'mine')) {
-        direction = directions[(directions.indexOf(direction) + 1) % directions.length]
+        await rotateAfterBlockedStep()
         continue
       }
       if (!await digIfSafe(next.offset(0, 1, 0), protectedAreas, 'mine')) {
-        direction = directions[(directions.indexOf(direction) + 1) % directions.length]
+        await rotateAfterBlockedStep()
         continue
       }
       if (!connected || !bot || activeTask !== 'mine' || taskGeneration !== generation) break
       await bot.pathfinder.goto(new goals.GoalNear(next.x, next.y, next.z, 1))
       if (!connected || !bot || activeTask !== 'mine' || taskGeneration !== generation) break
+      blockedDirections = 0
       steps++
       if (steps % 8 === 0) {
         const ore = findOreBlock()
@@ -1301,7 +1312,13 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   return {
     stop() {
       stopping = true
+      connected = false
+      taskGeneration++
+      activeTask = null
       if (reconnectTimer) clearTimeout(reconnectTimer)
+      reconnectTimer = null
+      if (jumpReleaseTimer) clearTimeout(jumpReleaseTimer)
+      jumpReleaseTimer = null
       stopCombat()
       if (bot) {
         try {
