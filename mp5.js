@@ -499,12 +499,47 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     return Boolean(block && /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|pale_oak|crimson|warped)_log$/.test(block.name))
   }
 
-  function findTreeLogs() {
+  function isOutsideProtectedAreas(position, protectedAreas, radius = 32) {
+    return protectedAreas.every(area => {
+      if (area.dimension !== bot.game.dimension) return true
+      const dx = position.x - area.x
+      const dz = position.z - area.z
+      return Math.sqrt(dx * dx + dz * dz) >= radius
+    })
+  }
+
+  function findRemoteWorkPoint(protectedAreas) {
+    if (!bot?.entity?.position) return null
+    const origin = bot.entity.position.floored()
+    const directions = [
+      [1, 0], [-1, 0], [0, 1], [0, -1],
+      [1, 1], [1, -1], [-1, 1], [-1, -1]
+    ]
+    for (const distance of [40, 48, 56, 64, 72]) {
+      for (const [dx, dz] of directions) {
+        const length = Math.sqrt(dx * dx + dz * dz)
+        const x = Math.floor(origin.x + dx / length * distance)
+        const z = Math.floor(origin.z + dz / length * distance)
+        for (let yOffset = 8; yOffset >= -12; yOffset--) {
+          const candidate = origin.offset(x - origin.x, yOffset, z - origin.z)
+          if (!isOutsideProtectedAreas(candidate, protectedAreas, 32)) continue
+          const feet = bot.blockAt(candidate)
+          const head = bot.blockAt(candidate.offset(0, 1, 0))
+          const floor = bot.blockAt(candidate.offset(0, -1, 0))
+          if (feet?.name === 'air' && head?.name === 'air' && floor?.boundingBox === 'block') return candidate
+        }
+      }
+    }
+    return null
+  }
+
+  function findTreeLogs(protectedAreas = []) {
     const groundNames = /^(grass_block|dirt|coarse_dirt|rooted_dirt|podzol|mycelium|moss_block|mud|muddy_mangrove_roots)$/
     const leavesPattern = /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|azalea|flowering_azalea|pale_oak)_leaves$/
-    const positions = bot.findBlocks({ matching: block => isLogBlock(block), maxDistance: 24, count: 60 })
+    const positions = bot.findBlocks({ matching: block => isLogBlock(block), maxDistance: 24, count: 100 })
     const bases = positions.map(position => bot.blockAt(position)).filter(block => {
-      if (!block || !groundNames.test(bot.blockAt(block.position.offset(0, -1, 0))?.name || '')) return false
+      if (!block || !isOutsideProtectedAreas(block.position, protectedAreas, 32)) return false
+      if (!groundNames.test(bot.blockAt(block.position.offset(0, -1, 0))?.name || '')) return false
       let height = 0
       while (height < 12 && isLogBlock(bot.blockAt(block.position.offset(0, height, 0)))) height++
       if (height < 2) return false
@@ -642,6 +677,188 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     return true
   }
 
+  function waitForHarvest(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms))
+  }
+
+  async function craftItem(itemName, count, table = null) {
+    const item = bot.registry.itemsByName[itemName]
+    if (!item) return false
+    const recipes = bot.recipesFor(item.id, null, 1, table)
+    if (!recipes.length) return false
+    await bot.craft(recipes[0], count, table)
+    return true
+  }
+
+  async function ensureHarvestTool(kind) {
+    const names = kind === 'wood'
+      ? ['netherite_axe', 'diamond_axe', 'iron_axe', 'stone_axe', 'golden_axe', 'wooden_axe']
+      : ['netherite_pickaxe', 'diamond_pickaxe', 'iron_pickaxe', 'stone_pickaxe', 'golden_pickaxe', 'wooden_pickaxe']
+    let tool = bot.inventory.items().find(item => names.includes(item.name))
+    if (tool) {
+      await bot.equip(tool, 'hand')
+      return true
+    }
+
+    const logs = bot.inventory.items().filter(item => /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|pale_oak|crimson|warped)_log$/.test(item.name))
+    if (logs.length && !bot.inventory.items().some(item => item.name.endsWith('_planks'))) {
+      const plankName = logs[0].name.replace('_log', '_planks')
+      await craftItem(plankName, 1)
+    }
+    let planks = bot.inventory.items().find(item => item.name.endsWith('_planks'))
+    if (planks && !bot.inventory.items().some(item => item.name === 'stick')) {
+      await craftItem('stick', 1)
+    }
+
+    let table = bot.findBlock({
+      matching: block => block.name === 'crafting_table',
+      maxDistance: 4
+    })
+    if (!table && bot.inventory.items().some(item => item.name === 'crafting_table')) {
+      const origin = bot.entity.position.floored()
+      const spots = [
+        origin.offset(1, 0, 0), origin.offset(-1, 0, 0),
+        origin.offset(0, 0, 1), origin.offset(0, 0, -1)
+      ]
+      for (const spot of spots) {
+        const floor = bot.blockAt(spot.offset(0, -1, 0))
+        if (bot.blockAt(spot)?.name !== 'air' || bot.blockAt(spot.offset(0, 1, 0))?.name !== 'air' || floor?.boundingBox !== 'block') continue
+        try {
+          await bot.placeBlock(floor, spot.minus(floor.position))
+          table = bot.blockAt(spot)
+          break
+        } catch (error) {
+          log('Could not place crafting table: ' + error.message)
+        }
+      }
+    }
+    if (!table && planks) {
+      if (await craftItem('crafting_table', 1)) {
+        const origin = bot.entity.position.floored()
+        const spots = [
+          origin.offset(1, 0, 0), origin.offset(-1, 0, 0),
+          origin.offset(0, 0, 1), origin.offset(0, 0, -1)
+        ]
+        for (const spot of spots) {
+          const floor = bot.blockAt(spot.offset(0, -1, 0))
+          if (bot.blockAt(spot)?.name !== 'air' || bot.blockAt(spot.offset(0, 1, 0))?.name !== 'air' || floor?.boundingBox !== 'block') continue
+          try {
+            await bot.placeBlock(floor, spot.minus(floor.position))
+            table = bot.blockAt(spot)
+            break
+          } catch (error) {
+            log('Could not place crafting table: ' + error.message)
+          }
+        }
+      }
+    }
+
+    const pickaxeMaterials = kind === 'wood'
+      ? ['diamond', 'iron', 'stone', 'wooden']
+      : ['diamond', 'iron', 'stone', 'wooden']
+    for (const material of pickaxeMaterials) {
+      const itemName = material + (kind === 'wood' ? '_axe' : '_pickaxe')
+      if (material === 'wooden') {
+        planks = bot.inventory.items().find(item => item.name.endsWith('_planks'))
+        if (!planks) continue
+      } else if (material === 'stone') {
+        if (!bot.inventory.items().some(item => ['cobblestone', 'cobbled_deepslate', 'blackstone'].includes(item.name))) continue
+      } else if (!bot.inventory.items().some(item => item.name === material + '_ingot' || item.name === material + '_gem')) {
+        continue
+      }
+      if (!table) continue
+      try {
+        if (await craftItem(itemName, 1, table)) {
+          tool = bot.inventory.items().find(item => item.name === itemName)
+          if (tool) {
+            await bot.equip(tool, 'hand')
+            bot.chat('J’ai fabriqué ' + itemName.replace('_', ' ') + ' pour continuer.')
+            return true
+          }
+        }
+      } catch (error) {
+        log('Could not craft ' + itemName + ': ' + error.message)
+      }
+    }
+    return false
+  }
+
+  function isMineableTunnelBlock(block) {
+    return Boolean(block && (
+      /^(stone|granite|diorite|andesite|deepslate|tuff|calcite|dripstone_block|cobblestone|cobbled_deepslate|dirt|coarse_dirt|gravel|clay|netherrack|blackstone|basalt|smooth_basalt|nether_quartz_ore|nether_gold_ore|ancient_debris)$/.test(block.name) ||
+      /^(coal|iron|copper|gold|redstone|lapis|diamond|emerald)_ore$/.test(block.name) ||
+      /^deepslate_(coal|iron|copper|gold|redstone|lapis|diamond|emerald)_ore$/.test(block.name)
+    ))
+  }
+
+  async function digIfSafe(position, protectedAreas, kind) {
+    if (!isOutsideProtectedAreas(position, protectedAreas, 32)) return false
+    const block = bot.blockAt(position)
+    if (!block || block.name === 'air') return true
+    if (!isMineableTunnelBlock(block) && !(kind === 'wood' && isLogBlock(block))) return false
+    if (!bot.canDigBlock(block)) return false
+    const tool = bot.pathfinder.bestHarvestTool(block)
+    if (tool && bot.heldItem?.type !== tool.type) await bot.equip(tool, 'hand')
+    await bot.dig(block)
+    return true
+  }
+
+  async function mineStaircase(protectedAreas, generation) {
+    const directions = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+    let direction = directions[Math.floor(Math.random() * directions.length)]
+    let steps = 0
+    let toolReady = await ensureHarvestTool('mine')
+    if (!toolReady) {
+      bot.chat('Il me manque de quoi fabriquer une pioche. Ajoute du bois, des bâtons et de la pierre ou du métal dans mon inventaire.')
+      while (connected && bot && activeTask === 'mine' && taskGeneration === generation && !toolReady) {
+        await waitForHarvest(5000)
+        toolReady = await ensureHarvestTool('mine')
+      }
+    }
+    while (connected && bot && activeTask === 'mine' && taskGeneration === generation) {
+      const position = bot.entity.position.floored()
+      const next = position.offset(direction[0], -1, direction[1])
+      if (!isOutsideProtectedAreas(next, protectedAreas, 32)) {
+        direction = directions[(directions.indexOf(direction) + 1) % directions.length]
+        continue
+      }
+      const landingFloor = bot.blockAt(next.offset(0, -1, 0))
+      if (!landingFloor || landingFloor.boundingBox !== 'block' || /water|lava/.test(landingFloor.name)) {
+        direction = directions[(directions.indexOf(direction) + 1) % directions.length]
+        continue
+      }
+      const feetBlock = bot.blockAt(next)
+      const headBlock = bot.blockAt(next.offset(0, 1, 0))
+      if ([feetBlock, headBlock].some(block => block && /water|lava/.test(block.name))) {
+        direction = directions[(directions.indexOf(direction) + 1) % directions.length]
+        continue
+      }
+      if (!await digIfSafe(next, protectedAreas, 'mine')) {
+        direction = directions[(directions.indexOf(direction) + 1) % directions.length]
+        continue
+      }
+      if (!await digIfSafe(next.offset(0, 1, 0), protectedAreas, 'mine')) {
+        direction = directions[(directions.indexOf(direction) + 1) % directions.length]
+        continue
+      }
+      if (!connected || !bot || activeTask !== 'mine' || taskGeneration !== generation) break
+      await bot.pathfinder.goto(new goals.GoalNear(next.x, next.y, next.z, 1))
+      if (!connected || !bot || activeTask !== 'mine' || taskGeneration !== generation) break
+      steps++
+      if (steps % 8 === 0) {
+        const ore = findOreBlock()
+        if (ore && ore.position.distanceTo(bot.entity.position) <= 4 && isOutsideProtectedAreas(ore.position, protectedAreas, 32)) {
+          await digIfSafe(ore.position, protectedAreas, 'mine')
+        }
+        toolReady = await ensureHarvestTool('mine')
+        if (!toolReady) {
+          bot.chat('Je n’ai plus de pioche utilisable et je ne peux pas en fabriquer une avec mon inventaire.')
+          await waitForHarvest(5000)
+        }
+      }
+    }
+  }
+
   async function runHarvestTask(kind) {
     if (activeTask) {
       bot.chat('Je suis déjà occupé. Dis-moi « arrête » pour annuler.')
@@ -651,53 +868,63 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     activeTask = kind
     followTarget = null
     stopCombat()
-    bot.chat(kind === 'wood' ? 'Je pars chercher des arbres et couper leurs troncs.' : 'Je pars chercher des minerais à proximité.')
-    const limit = kind === 'wood' ? 24 : 20
+    const protectedAreas = [{
+      x: bot.entity.position.x,
+      z: bot.entity.position.z,
+      dimension: bot.game.dimension
+    }, ...Array.from(rememberedPositions.values())
+      .filter(position => position.dimension === bot.game.dimension)
+      .map(position => ({ x: position.x, z: position.z, dimension: position.dimension }))]
+    bot.chat(kind === 'wood'
+      ? 'Je pars chercher du bois loin des positions protégées. Je continuerai jusqu’à ce que tu me dises d’arrêter.'
+      : 'Je pars loin des positions protégées pour creuser une mine en escalier. Je continuerai jusqu’à ce que tu me dises d’arrêter.')
     let harvested = 0
     let treeQueue = []
     try {
-      while (connected && bot && activeTask === kind && taskGeneration === generation && harvested < limit) {
-        let targetPosition
-        let expectedName
-        if (kind === 'wood') {
-          while (!treeQueue.length) {
-            treeQueue = findTreeLogs()
-            if (!treeQueue.length) break
+      const remotePoint = findRemoteWorkPoint(protectedAreas)
+      if (remotePoint) {
+        await bot.pathfinder.goto(new goals.GoalNear(remotePoint.x, remotePoint.y, remotePoint.z, 3))
+      } else {
+        bot.chat('Je ne trouve pas de zone sûre assez éloignée. Mémorise la maison ou déplace-moi plus loin.')
+        while (connected && bot && activeTask === kind && taskGeneration === generation) await waitForHarvest(3000)
+      }
+      if (kind === 'mine' && connected && bot && activeTask === kind && taskGeneration === generation) {
+        await mineStaircase(protectedAreas, generation)
+      }
+      while (kind === 'wood' && connected && bot && activeTask === kind && taskGeneration === generation) {
+        if (!treeQueue.length) treeQueue = findTreeLogs(protectedAreas)
+        if (!treeQueue.length) {
+          const nextPoint = findRemoteWorkPoint(protectedAreas)
+          if (nextPoint) {
+            await bot.pathfinder.goto(new goals.GoalNear(nextPoint.x, nextPoint.y, nextPoint.z, 3))
+            await waitForHarvest(1200)
+          } else {
+            await waitForHarvest(3000)
           }
-          targetPosition = treeQueue.shift()
-          if (!targetPosition) break
-          expectedName = 'log'
-        } else {
-          const target = findOreBlock()
-          if (!target) break
-          targetPosition = target.position.clone()
-          expectedName = target.name
+          continue
         }
+        const targetPosition = treeQueue.shift()
+        if (!targetPosition || !isOutsideProtectedAreas(targetPosition, protectedAreas, 32)) continue
         await bot.pathfinder.goto(new goals.GoalNear(targetPosition.x, targetPosition.y, targetPosition.z, 2))
         if (!connected || !bot || activeTask !== kind || taskGeneration !== generation) break
         const currentBlock = bot.blockAt(targetPosition)
-        if (!currentBlock || currentBlock.name === 'air' || (kind === 'wood' ? !isLogBlock(currentBlock) : currentBlock.name !== expectedName)) continue
+        if (!currentBlock || !isLogBlock(currentBlock)) continue
         if (!bot.canDigBlock(currentBlock)) {
-          log('Cannot reach harvest target ' + currentBlock.name + '.')
-          break
+          log('Cannot reach tree log ' + currentBlock.name + '.')
+          treeQueue = []
+          continue
         }
-        const bestTool = bot.pathfinder.bestHarvestTool(currentBlock)
-        if (bestTool) {
-          await bot.equip(bestTool, 'hand')
-          log('Equipped ' + bestTool.name + ' to harvest ' + currentBlock.name + '.')
+        if (!await ensureHarvestTool('wood')) {
+          log('No axe could be crafted; continuing with the available hand tool.')
         }
         await bot.dig(currentBlock)
         harvested++
       }
-      if (connected && bot && activeTask === kind && taskGeneration === generation) {
-        bot.chat(harvested
-          ? 'J’ai terminé. J’ai récolté ' + harvested + ' bloc(s).'
-          : kind === 'wood' ? 'Je n’ai pas trouvé d’arbre adapté à proximité.' : 'Je n’ai trouvé aucun minerai à proximité.')
-      }
     } catch (error) {
       if (connected && bot && taskGeneration === generation) {
         log('Harvest task failed: ' + error.message)
-        bot.chat('Je n’ai pas pu continuer ma récolte.')
+        bot.chat('J’ai rencontré un problème et je réessaie de continuer.')
+        await waitForHarvest(1500)
       }
     } finally {
       if (taskGeneration === generation) activeTask = null
