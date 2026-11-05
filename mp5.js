@@ -763,8 +763,9 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         if (!planks) continue
       } else if (material === 'stone') {
         if (!bot.inventory.items().some(item => ['cobblestone', 'cobbled_deepslate', 'blackstone'].includes(item.name))) continue
-      } else if (!bot.inventory.items().some(item => item.name === material + '_ingot' || item.name === material + '_gem')) {
-        continue
+      } else {
+        const requiredMaterial = material === 'diamond' ? 'diamond' : material + '_ingot'
+        if (!bot.inventory.items().some(item => item.name === requiredMaterial)) continue
       }
       if (!table) continue
       try {
