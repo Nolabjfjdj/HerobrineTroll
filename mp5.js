@@ -22,6 +22,8 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   let activeTask = null
   let taskGeneration = 0
   let eatingFood = false
+  let fleeingMobId = null
+  let fleeingUntil = 0
   let lastNoFoodWarningAt = 0
   const authorizedPlayers = new Set([owner, 'Itzhugoo12'])
   const protectedPlayers = new Set(Array.from(authorizedPlayers, player => player.toLowerCase()))
@@ -276,13 +278,60 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     }).catch(error => log('Could not empty hand: ' + error.message))
   }
 
-  function attackMob(entity, reason) {
-    if (!connected || !bot || !entity || entity.type !== 'mob' || entity.name === 'wolf') return
+  function isHostileMob(entity) {
+    return Boolean(entity && entity.type === 'mob' && entity.name !== 'wolf' &&
+      /zombie|skeleton|creeper|spider|enderman|witch|slime|phantom|drowned|husk|stray|pillager|vindicator|ravager|evoker|blaze|ghast|hoglin|piglin|warden|silverfish|guardian|shulker|vex|breeze|bogged|cave_spider|magma_cube|zoglin|wither_skeleton|zombified_piglin/i.test(entity.name || ''))
+  }
+
+  function fleeFromMob(entity, reason) {
+    if (!connected || !bot || !entity?.position || !bot.entity?.position) return
+    const now = Date.now()
+    if (fleeingMobId === entity.id && now < fleeingUntil) return
     stopCombat()
-    log('Attacking ' + entity.name + ' with an empty hand (' + reason + ').')
-    bot.unequip('hand').then(() => {
-      if (connected && bot) bot.pvp.attack(entity)
-    }).catch(error => log('Could not empty hand before defending: ' + error.message))
+    const origin = bot.entity.position
+    let dx = origin.x - entity.position.x
+    let dz = origin.z - entity.position.z
+    let distance = Math.sqrt(dx * dx + dz * dz)
+    if (distance < 0.01) {
+      dx = Math.cos(bot.entity.yaw || 0)
+      dz = Math.sin(bot.entity.yaw || 0)
+      distance = Math.sqrt(dx * dx + dz * dz) || 1
+    }
+    const escapeDistance = entity.name === 'creeper' ? 18 : 12
+    const targetX = Math.floor(origin.x + dx / distance * escapeDistance)
+    const targetZ = Math.floor(origin.z + dz / distance * escapeDistance)
+    fleeingMobId = entity.id
+    fleeingUntil = now + 2500
+    bot.pathfinder.setGoal(new goals.GoalNear(targetX, Math.floor(origin.y), targetZ, 2))
+    log('Fleeing from ' + entity.name + ' (' + reason + ').')
+  }
+
+  function attackMob(entity, reason) {
+    if (!isHostileMob(entity)) return
+    fleeFromMob(entity, reason)
+  }
+
+  function handleVisibleThreats() {
+    if (!connected || !bot?.entity?.position || bot.currentWindow || givingItems) return
+    const nearby = Object.values(bot.entities).filter(entity =>
+      isHostileMob(entity) && entity.position &&
+      entity.position.distanceTo(bot.entity.position) <= (entity.name === 'creeper' ? 12 : 7)
+    ).sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))
+    if (nearby.length) {
+      const threat = nearby.find(entity => entity.name === 'creeper') || nearby[0]
+      fleeFromMob(threat, 'nearby hostile mob detected')
+      return
+    }
+    if (fleeingMobId !== null && Date.now() >= fleeingUntil) {
+      const previousThreat = bot.entities[fleeingMobId]
+      if (!previousThreat?.position || previousThreat.position.distanceTo(bot.entity.position) > 12) {
+        fleeingMobId = null
+        if (followTarget) {
+          const target = bot.players[followTarget]?.entity
+          if (target) bot.pathfinder.setGoal(new goals.GoalFollow(target, 2), true)
+        }
+      }
+    }
   }
 
   function handleAttacker(entity, reason) {
@@ -310,12 +359,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       now - (swingTimes.get(entity.id) || 0) <= 2200
     )
     if (recentPlayer) return recentPlayer
-    const hostileNames = /zombie|skeleton|creeper|spider|enderman|witch|slime|phantom|drowned|husk|stray|pillager|vindicator|ravager|evoker|blaze|ghast|hoglin|piglin|warden|silverfish|guardian|shulker|vex|breeze|bogged|cave_spider|magma_cube|zoglin| zoglin|wither_skeleton|zombified_piglin/i
-    return nearby.find(entity =>
-      entity.type === 'mob' &&
-      entity.name !== 'wolf' &&
-      hostileNames.test(entity.name || '')
-    ) || null
+    return nearby.find(isHostileMob) || null
   }
 
   function isLogBlock(block) {
@@ -737,12 +781,10 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     bot.on('entitySwingArm', entity => {
       if (entity?.id !== undefined) swingTimes.set(entity.id, Date.now())
     })
-    bot.on('entityHurt', (hurtEntity, source) => {
+    bot.on('entityHurt', hurtEntity => {
       if (!hurtEntity) return
       if (hurtEntity.id === bot.entity?.id) {
-        const attacker = source?.position && source.id !== bot.entity?.id
-          ? source
-          : findNearbyAttacker(bot.entity)
+        const attacker = findNearbyAttacker(bot.entity)
         if (!attacker) {
           log('MP5 was hurt, but the attacker could not be identified nearby.')
           return
@@ -765,19 +807,10 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       const sourcePlayer = source?.username
       if (protectedPlayers.has(String(hurtPlayer || '').toLowerCase())) {
         log(hurtPlayer + ' was hurt. Damage source: ' + (sourcePlayer || source?.name || 'not identified') + '.')
-        const attacker = source?.position && source.id !== bot.entity?.id
-          ? source
-          : findNearbyAttacker(bot.players[hurtPlayer]?.entity)
+        const attacker = findNearbyAttacker(bot.players[hurtPlayer]?.entity)
         if (attacker) handleAttacker(attacker, 'defending ' + hurtPlayer)
         else log('Could not identify the attacker near ' + hurtPlayer + '.')
         return
-      }
-      if (sourcePlayer && authorizedPlayers.has(sourcePlayer) && hurtEntity.type === 'mob') {
-        attackMob(hurtEntity, sourcePlayer + ' attacked it')
-        return
-      }
-      if (sourcePlayer && authorizedPlayers.has(sourcePlayer) && hurtEntity.type === 'player' && !authorizedPlayers.has(hurtPlayer)) {
-        punchPlayer(hurtEntity)
       }
     })
     bot.on('physicsTick', () => {
@@ -794,6 +827,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         }
         return
       }
+      handleVisibleThreats()
       updateIdleLook()
       if (!connected || !bot || !playerTarget || !playerHitPending) return
       const target = playerTarget
