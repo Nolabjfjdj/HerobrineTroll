@@ -261,14 +261,40 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     mobTargetId = null
   }
 
+  function isNearLadder() {
+    if (!bot?.entity?.position) return false
+    const position = bot.entity.position.floored()
+    for (let x = -1; x <= 1; x++) {
+      for (let y = -1; y <= 1; y++) {
+        for (let z = -1; z <= 1; z++) {
+          if (Math.abs(x) + Math.abs(z) > 1) continue
+          const block = bot.blockAt(position.offset(x, y, z))
+          if (block?.name === 'ladder') return true
+        }
+      }
+    }
+    return false
+  }
+
   function handleStuckMovement() {
     if (!connected || !bot?.entity?.position || !bot.pathfinder?.goal || bot.currentWindow || givingItems || eatingFood) {
+      if (jumpReleaseTimer) clearTimeout(jumpReleaseTimer)
+      jumpReleaseTimer = null
+      if (bot && connected) bot.setControlState('jump', false)
       lastMovementPosition = bot?.entity?.position?.clone() || null
       lastMovementCheckAt = Date.now()
       return
     }
     const now = Date.now()
     const position = bot.entity.position
+    if (!isNearLadder()) {
+      if (jumpReleaseTimer) clearTimeout(jumpReleaseTimer)
+      jumpReleaseTimer = null
+      bot.setControlState('jump', false)
+      lastMovementPosition = position.clone()
+      lastMovementCheckAt = now
+      return
+    }
     if (!lastMovementPosition) {
       lastMovementPosition = position.clone()
       lastMovementCheckAt = now
@@ -290,9 +316,9 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         if (bot && connected) bot.setControlState('jump', false)
         jumpReleaseTimer = null
       }, 300)
-      log('Movement blocked. Trying to jump over the obstacle.')
+      log('Movement blocked near a ladder. Trying to jump over the obstacle.')
     } catch (error) {
-      log('Could not trigger obstacle jump: ' + error.message)
+      log('Could not trigger ladder recovery jump: ' + error.message)
     }
   }
 
