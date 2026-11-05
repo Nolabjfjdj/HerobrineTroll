@@ -804,9 +804,8 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         return
       }
       const hurtPlayer = hurtEntity.username
-      const sourcePlayer = source?.username
       if (protectedPlayers.has(String(hurtPlayer || '').toLowerCase())) {
-        log(hurtPlayer + ' was hurt. Damage source: ' + (sourcePlayer || source?.name || 'not identified') + '.')
+        log(hurtPlayer + ' was hurt. Checking for a nearby hostile mob.')
         const attacker = findNearbyAttacker(bot.players[hurtPlayer]?.entity)
         if (attacker) handleAttacker(attacker, 'defending ' + hurtPlayer)
         else log('Could not identify the attacker near ' + hurtPlayer + '.')
