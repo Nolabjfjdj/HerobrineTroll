@@ -24,6 +24,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   let eatingFood = false
   let fleeingMobId = null
   let fleeingUntil = 0
+  let mobTargetId = null
   let lastNoFoodWarningAt = 0
   const authorizedPlayers = new Set([owner, 'Itzhugoo12'])
   const protectedPlayers = new Set(Array.from(authorizedPlayers, player => player.toLowerCase()))
@@ -253,6 +254,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     } catch {}
     playerTarget = null
     playerHitPending = false
+    mobTargetId = null
   }
 
   function scheduleReconnect() {
@@ -306,9 +308,56 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     log('Fleeing from ' + entity.name + ' (' + reason + ').')
   }
 
+  function bestCombatWeapon() {
+    const priorities = [
+      'netherite_sword', 'diamond_sword', 'iron_sword', 'stone_sword', 'golden_sword', 'wooden_sword',
+      'netherite_axe', 'diamond_axe', 'iron_axe', 'stone_axe', 'golden_axe', 'wooden_axe'
+    ]
+    const inventory = bot.inventory.items()
+    for (const name of priorities) {
+      const weapon = inventory.find(item => item.name === name)
+      if (weapon) return weapon
+    }
+    return null
+  }
+
+  async function engageMob(entity, reason) {
+    if (!connected || !bot || !isHostileMob(entity) || !entity.position) return
+    if (entity.name === 'creeper') {
+      fleeFromMob(entity, reason + ': creeper')
+      return
+    }
+    if (bot.health !== undefined && bot.health <= 8) {
+      fleeFromMob(entity, reason + ': low health')
+      return
+    }
+    if (mobTargetId === entity.id) return
+    stopCombat()
+    mobTargetId = entity.id
+    fleeingMobId = null
+    try {
+      const weapon = bestCombatWeapon()
+      if (weapon) {
+        await bot.equip(weapon, 'hand')
+        if (!connected || !bot || mobTargetId !== entity.id || !bot.entities[entity.id]) return
+        log('Equipped ' + weapon.name + ' to defend against ' + entity.name + '.')
+      }
+      const result = bot.pvp.attack(entity)
+      if (result && typeof result.catch === 'function') {
+        result.catch(error => {
+          if (mobTargetId === entity.id) mobTargetId = null
+          log('Could not fight ' + entity.name + ': ' + error.message)
+        })
+      }
+      log('Fighting hostile mob ' + entity.name + ' (' + reason + ').')
+    } catch (error) {
+      if (mobTargetId === entity.id) mobTargetId = null
+      log('Could not prepare for combat with ' + entity.name + ': ' + error.message)
+    }
+  }
+
   function attackMob(entity, reason) {
-    if (!isHostileMob(entity)) return
-    fleeFromMob(entity, reason)
+    engageMob(entity, reason)
   }
 
   function handleVisibleThreats() {
@@ -318,9 +367,28 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       entity.position.distanceTo(bot.entity.position) <= (entity.name === 'creeper' ? 12 : 7)
     ).sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))
     if (nearby.length) {
-      const threat = nearby.find(entity => entity.name === 'creeper') || nearby[0]
-      fleeFromMob(threat, 'nearby hostile mob detected')
+      const creeper = nearby.find(entity => entity.name === 'creeper')
+      if (creeper) {
+        fleeFromMob(creeper, 'nearby creeper detected')
+        return
+      }
+      const threat = nearby[0]
+      if (bot.health !== undefined && bot.health <= 8) {
+        fleeFromMob(threat, 'low health')
+        return
+      }
+      engageMob(threat, 'nearby hostile mob detected')
       return
+    }
+    if (mobTargetId !== null && !bot.entities[mobTargetId]) {
+      mobTargetId = null
+      try {
+        bot.pvp.stop()
+      } catch {}
+      if (followTarget) {
+        const target = bot.players[followTarget]?.entity
+        if (target) bot.pathfinder.setGoal(new goals.GoalFollow(target, 2), true)
+      }
     }
     if (fleeingMobId !== null && Date.now() >= fleeingUntil) {
       const previousThreat = bot.entities[fleeingMobId]
