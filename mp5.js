@@ -264,10 +264,10 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   function isNearLadder() {
     if (!bot?.entity?.position) return false
     const position = bot.entity.position.floored()
-    for (let x = -1; x <= 1; x++) {
-      for (let y = -1; y <= 1; y++) {
-        for (let z = -1; z <= 1; z++) {
-          if (Math.abs(x) + Math.abs(z) > 1) continue
+    for (let x = -2; x <= 2; x++) {
+      for (let y = -2; y <= 2; y++) {
+        for (let z = -2; z <= 2; z++) {
+          if (Math.abs(x) + Math.abs(z) > 2) continue
           const block = bot.blockAt(position.offset(x, y, z))
           if (block?.name === 'ladder') return true
         }
