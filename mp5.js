@@ -859,34 +859,38 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     }
   }
 
-  async function runHarvestTask(kind) {
-    if (activeTask) {
+  async function runHarvestTask(kind, resumeState = null) {
+    if (activeTask && !resumeState) {
       bot.chat('Je suis déjà occupé. Dis-moi « arrête » pour annuler.')
       return
     }
-    const generation = ++taskGeneration
+    const generation = resumeState ? resumeState.generation : ++taskGeneration
     activeTask = kind
     followTarget = null
     stopCombat()
-    const protectedAreas = [{
+    const protectedAreas = resumeState ? resumeState.protectedAreas : [{
       x: bot.entity.position.x,
       z: bot.entity.position.z,
       dimension: bot.game.dimension
     }, ...Array.from(rememberedPositions.values())
       .filter(position => position.dimension === bot.game.dimension)
       .map(position => ({ x: position.x, z: position.z, dimension: position.dimension }))]
-    bot.chat(kind === 'wood'
-      ? 'Je pars chercher du bois loin des positions protégées. Je continuerai jusqu’à ce que tu me dises d’arrêter.'
-      : 'Je pars loin des positions protégées pour creuser une mine en escalier. Je continuerai jusqu’à ce que tu me dises d’arrêter.')
-    let harvested = 0
-    let treeQueue = []
+    if (!resumeState) {
+      bot.chat(kind === 'wood'
+        ? 'Je pars chercher du bois loin des positions protégées. Je continuerai jusqu’à ce que tu me dises d’arrêter.'
+        : 'Je pars loin des positions protégées pour creuser une mine en escalier. Je continuerai jusqu’à ce que tu me dises d’arrêter.')
+    }
+    let harvested = resumeState?.harvested || 0
+    let treeQueue = resumeState?.treeQueue || []
     try {
-      const remotePoint = findRemoteWorkPoint(protectedAreas)
-      if (remotePoint) {
-        await bot.pathfinder.goto(new goals.GoalNear(remotePoint.x, remotePoint.y, remotePoint.z, 3))
-      } else {
-        bot.chat('Je ne trouve pas de zone sûre assez éloignée. Mémorise la maison ou déplace-moi plus loin.')
-        while (connected && bot && activeTask === kind && taskGeneration === generation) await waitForHarvest(3000)
+      if (!resumeState) {
+        const remotePoint = findRemoteWorkPoint(protectedAreas)
+        if (remotePoint) {
+          await bot.pathfinder.goto(new goals.GoalNear(remotePoint.x, remotePoint.y, remotePoint.z, 3))
+        } else {
+          bot.chat('Je ne trouve pas de zone sûre assez éloignée. Mémorise la maison ou déplace-moi plus loin.')
+          while (connected && bot && activeTask === kind && taskGeneration === generation) await waitForHarvest(3000)
+        }
       }
       if (kind === 'mine' && connected && bot && activeTask === kind && taskGeneration === generation) {
         await mineStaircase(protectedAreas, generation)
@@ -921,10 +925,13 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         harvested++
       }
     } catch (error) {
-      if (connected && bot && taskGeneration === generation) {
-        log('Harvest task failed: ' + error.message)
-        bot.chat('J’ai rencontré un problème et je réessaie de continuer.')
+      if (connected && bot && activeTask === kind && taskGeneration === generation) {
+        log('Harvest task interrupted by an error: ' + error.message)
+        bot.chat('J’ai rencontré un obstacle. Je reprends la tâche.')
         await waitForHarvest(1500)
+        if (connected && bot && activeTask === kind && taskGeneration === generation) {
+          await runHarvestTask(kind, { generation, protectedAreas, harvested, treeQueue })
+        }
       }
     } finally {
       if (taskGeneration === generation) activeTask = null
