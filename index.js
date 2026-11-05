@@ -544,11 +544,6 @@ function shutdown(signal) {
   if (reconnectTimer) clearTimeout(reconnectTimer)
   if (mp5Controller) mp5Controller.stop()
   resetTrollState()
-  if (mp5) {
-    try {
-      mp5.quit('mp5_123 is restarting')
-    } catch {}
-  }
   if (bot) {
     try {
       bot.quit('Herobrine is restarting')
