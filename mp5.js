@@ -967,6 +967,28 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         }
         return
       }
+      const attackMatch = message.trim().match(/^tape\s+([A-Za-z0-9_]{1,16}|moi)$/i)
+      if (attackMatch) {
+        const requestedName = attackMatch[1]
+        const targetName = requestedName.toLowerCase() === 'moi' ? String(owner) : requestedName
+        const targetEntry = Object.entries(bot.players).find(([name, player]) =>
+          name.toLowerCase() === targetName.toLowerCase() && player.entity
+        )
+        if (!targetEntry) {
+          bot.chat(requestedName.toLowerCase() === 'moi'
+            ? 'Je ne te vois pas. Rapproche-toi de moi.'
+            : 'Je ne vois pas ce joueur. Vérifie son pseudo et assure-toi qu’il est connecté.')
+          return
+        }
+        const target = targetEntry[1].entity
+        stopActiveTask()
+        followTarget = null
+        giveRequest = null
+        punchPlayer(target)
+        bot.chat('D’accord, je vais taper ' + targetEntry[0] + '.')
+        log('Owner command: attacking player ' + targetEntry[0] + '.')
+        return
+      }
     }
     const normalizedMessage = message.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     const rememberMatch = normalizedMessage.match(/^memorise\s+(.{1,32})$/i)
