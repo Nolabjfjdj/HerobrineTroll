@@ -26,6 +26,10 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   let fleeingUntil = 0
   let mobTargetId = null
   let lastNoFoodWarningAt = 0
+  let lastMovementPosition = null
+  let lastMovementCheckAt = 0
+  let lastJumpAt = 0
+  let jumpReleaseTimer = null
   const authorizedPlayers = new Set([owner, 'Itzhugoo12'])
   const protectedPlayers = new Set(Array.from(authorizedPlayers, player => player.toLowerCase()))
   const rememberedPositions = new Map()
@@ -255,6 +259,41 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     playerTarget = null
     playerHitPending = false
     mobTargetId = null
+  }
+
+  function handleStuckMovement() {
+    if (!connected || !bot?.entity?.position || !bot.pathfinder?.goal || bot.currentWindow || givingItems || eatingFood) {
+      lastMovementPosition = bot?.entity?.position?.clone() || null
+      lastMovementCheckAt = Date.now()
+      return
+    }
+    const now = Date.now()
+    const position = bot.entity.position
+    if (!lastMovementPosition) {
+      lastMovementPosition = position.clone()
+      lastMovementCheckAt = now
+      return
+    }
+    if (position.distanceTo(lastMovementPosition) >= 0.35) {
+      lastMovementPosition = position.clone()
+      lastMovementCheckAt = now
+      return
+    }
+    if (now - lastMovementCheckAt < 1400 || now - lastJumpAt < 1800) return
+    lastJumpAt = now
+    lastMovementPosition = position.clone()
+    lastMovementCheckAt = now
+    try {
+      bot.setControlState('jump', true)
+      if (jumpReleaseTimer) clearTimeout(jumpReleaseTimer)
+      jumpReleaseTimer = setTimeout(() => {
+        if (bot && connected) bot.setControlState('jump', false)
+        jumpReleaseTimer = null
+      }, 300)
+      log('Movement blocked. Trying to jump over the obstacle.')
+    } catch (error) {
+      log('Could not trigger obstacle jump: ' + error.message)
+    }
   }
 
   function scheduleReconnect() {
@@ -895,6 +934,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         return
       }
       handleVisibleThreats()
+      handleStuckMovement()
       updateIdleLook()
       if (!connected || !bot || !playerTarget || !playerHitPending) return
       const target = playerTarget
@@ -914,6 +954,9 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       connected = true
       reconnectDelay = 5000
       swingTimes.clear()
+      lastMovementPosition = bot.entity.position.clone()
+      lastMovementCheckAt = Date.now()
+      lastJumpAt = 0
       recentAttacker = null
       recentAttackerAt = 0
       const movements = new Movements(bot)
@@ -958,6 +1001,8 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     bot.on('error', error => log('Connection error: ' + error.message))
     bot.once('end', reason => {
       connected = false
+      if (jumpReleaseTimer) clearTimeout(jumpReleaseTimer)
+      jumpReleaseTimer = null
       stopCombat()
       swingTimes.clear()
       giveRequest = null
