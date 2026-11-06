@@ -544,36 +544,44 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   }
 
   function findTreeLogs(protectedAreas = []) {
+    if (!bot?.entity?.position) return []
     const groundNames = /^(grass_block|dirt|coarse_dirt|rooted_dirt|podzol|mycelium|moss_block|mud|muddy_mangrove_roots)$/
     const leavesPattern = /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|azalea|flowering_azalea|pale_oak)_leaves$/
-    const positions = bot.findBlocks({ matching: block => isLogBlock(block), maxDistance: 24, count: 100 })
-    const bases = positions.map(position => bot.blockAt(position)).filter(block => {
-      if (!block || !isOutsideProtectedAreas(block.position, protectedAreas, 32)) return false
-      if (!groundNames.test(bot.blockAt(block.position.offset(0, -1, 0))?.name || '')) return false
-      let height = 0
-      while (height < 12 && isLogBlock(bot.blockAt(block.position.offset(0, height, 0)))) height++
-      if (height < 2) return false
-      for (let y = height - 1; y <= height + 4; y++) {
-        for (let x = -5; x <= 5; x++) {
+    const positions = bot.findBlocks({
+      matching: block => isLogBlock(block),
+      maxDistance: 24,
+      count: 100
+    }).sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
+
+    for (const position of positions) {
+      if (!isOutsideProtectedAreas(position, protectedAreas, 32)) continue
+      const baseBlock = bot.blockAt(position)
+      if (!baseBlock || !groundNames.test(bot.blockAt(position.offset(0, -1, 0))?.name || '')) continue
+
+      const logs = []
+      for (let height = 0; height < 12; height++) {
+        const block = bot.blockAt(position.offset(0, height, 0))
+        if (!isLogBlock(block)) break
+        logs.push(block.position.clone())
+      }
+      if (logs.length < 2) continue
+
+      let hasLeaves = false
+      for (let y = logs.length - 1; y <= logs.length + 4 && !hasLeaves; y++) {
+        for (let x = -5; x <= 5 && !hasLeaves; x++) {
           for (let z = -5; z <= 5; z++) {
-            const nearby = bot.blockAt(block.position.offset(x, y, z))
-            if (nearby && leavesPattern.test(nearby.name)) return true
+            const nearby = bot.blockAt(position.offset(x, y, z))
+            if (nearby && leavesPattern.test(nearby.name)) {
+              hasLeaves = true
+              break
+            }
           }
         }
       }
-      return false
-    }).sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))
-    if (!bases.length) return []
-    const base = bases[0]
-    const logs = []
-    for (let height = 0; height < 12; height++) {
-      const block = bot.blockAt(base.position.offset(0, height, 0))
-      if (!isLogBlock(block)) break
-      logs.push(block.position.clone())
+      if (hasLeaves) return logs
     }
-    return logs
+    return []
   }
-
   function findOreBlock() {
     const orePattern = /^(coal_ore|deepslate_coal_ore|iron_ore|deepslate_iron_ore|copper_ore|deepslate_copper_ore|gold_ore|deepslate_gold_ore|redstone_ore|deepslate_redstone_ore|lapis_ore|deepslate_lapis_ore|diamond_ore|deepslate_diamond_ore|emerald_ore|deepslate_emerald_ore|nether_gold_ore|nether_quartz_ore|ancient_debris)$/
     const positions = bot.findBlocks({ matching: block => Boolean(block && orePattern.test(block.name)), maxDistance: 32, count: 80 })
