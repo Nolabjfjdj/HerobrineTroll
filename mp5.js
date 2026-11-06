@@ -480,12 +480,12 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   }
 
   function findNearbyAttacker(ownerEntity) {
-    if (!bot || !ownerEntity) return null
+    if (!bot || !ownerEntity?.position) return null
     const now = Date.now()
     const nearby = Object.values(bot.entities).filter(entity =>
       entity.id !== ownerEntity.id &&
       entity.position &&
-      entity.position.distanceTo(ownerEntity.position) <= 6
+      entity.position.distanceTo(ownerEntity.position) <= 8
     )
     nearby.sort((a, b) => a.position.distanceTo(ownerEntity.position) - b.position.distanceTo(ownerEntity.position))
     const recentPlayer = nearby.find(entity =>
@@ -494,6 +494,15 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     )
     if (recentPlayer) return recentPlayer
     return nearby.find(isHostileMob) || null
+  }
+
+  function findProtectedPlayerEntity(entityId) {
+    if (!bot || entityId === undefined || entityId === null) return null
+    for (const [playerName, player] of Object.entries(bot.players)) {
+      if (!protectedPlayers.has(playerName.toLowerCase())) continue
+      if (player.entity?.id === entityId) return player.entity
+    }
+    return null
   }
 
   function isLogBlock(block) {
@@ -1205,10 +1214,11 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         }
         return
       }
-      const hurtPlayer = hurtEntity.username
-      if (protectedPlayers.has(String(hurtPlayer || '').toLowerCase())) {
+      const protectedEntity = findProtectedPlayerEntity(hurtEntity.id)
+      if (protectedEntity) {
+        const hurtPlayer = protectedEntity.username || protectedEntity.name
         log(hurtPlayer + ' was hurt. Checking for a nearby hostile mob.')
-        const attacker = findNearbyAttacker(bot.players[hurtPlayer]?.entity)
+        const attacker = findNearbyAttacker(protectedEntity)
         if (attacker) handleAttacker(attacker, 'defending ' + hurtPlayer)
         else log('Could not identify the attacker near ' + hurtPlayer + '.')
         return
