@@ -29,6 +29,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   let lastMovementPosition = null
   let lastMovementCheckAt = 0
   let lastJumpAt = 0
+  let lastPeriodicCheckAt = 0
   let jumpReleaseTimer = null
   const authorizedPlayers = new Set([owner, 'Itzhugoo12'])
   const protectedPlayers = new Set(Array.from(authorizedPlayers, player => player.toLowerCase()))
@@ -1227,9 +1228,13 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
         }
         return
       }
-      handleVisibleThreats()
-      handleStuckMovement()
-      updateIdleLook()
+      const now = Date.now()
+      if (now - lastPeriodicCheckAt >= 500) {
+        lastPeriodicCheckAt = now
+        handleVisibleThreats()
+        handleStuckMovement()
+        updateIdleLook()
+      }
       if (!connected || !bot || !playerTarget || !playerHitPending) return
       const target = playerTarget
       if (!bot.entities[target.id] || !target.position || !bot.entity?.position) {
