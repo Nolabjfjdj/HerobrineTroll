@@ -20,6 +20,7 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
   let lastLookAt = 0
   let ignoredLookEntityId = null
   let activeTask = null
+  let harvestRetryTimer = null
   let taskGeneration = 0
   let eatingFood = false
   let fleeingMobId = null
@@ -624,6 +625,8 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
     if (!activeTask) return false
     taskGeneration++
     activeTask = null
+    if (harvestRetryTimer) clearTimeout(harvestRetryTimer)
+    harvestRetryTimer = null
     try {
       bot.pathfinder.setGoal(null)
       bot.stopDigging()
@@ -894,13 +897,16 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       if (connected && bot && activeTask === kind && taskGeneration === generation) {
         log('Harvest task interrupted by an error: ' + error.message)
         bot.chat('J’ai rencontré un obstacle. Je reprends la tâche.')
-        await waitForHarvest(1500)
-        if (connected && bot && activeTask === kind && taskGeneration === generation) {
-          await runHarvestTask(kind, { generation, protectedAreas, harvested, treeQueue })
-        }
+        if (harvestRetryTimer) clearTimeout(harvestRetryTimer)
+        harvestRetryTimer = setTimeout(() => {
+          harvestRetryTimer = null
+          if (connected && bot && activeTask === kind && taskGeneration === generation) {
+            runHarvestTask(kind, { generation, protectedAreas, harvested, treeQueue })
+          }
+        }, 1500)
       }
     } finally {
-      if (taskGeneration === generation) activeTask = null
+      if (taskGeneration === generation && !harvestRetryTimer) activeTask = null
     }
   }
 
@@ -1274,6 +1280,8 @@ module.exports = function startMp5({ mineflayer, host, port, version, owner }) {
       connected = false
       taskGeneration++
       activeTask = null
+      if (harvestRetryTimer) clearTimeout(harvestRetryTimer)
+      harvestRetryTimer = null
       if (reconnectTimer) clearTimeout(reconnectTimer)
       reconnectTimer = null
       if (jumpReleaseTimer) clearTimeout(jumpReleaseTimer)
